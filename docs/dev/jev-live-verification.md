@@ -40,6 +40,14 @@ legend); the adapter normalized it to 0.2775 on the 0..1 risk scale.
 stores the versioned model, latency and token usage with each decision, so the
 cost of a decision can be audited later.
 
+## Panel capture
+
+The same live ledger was captured from the real panel on tab `6 AUDIT` and
+rendered to `docs/media/panel-audit-live-en.png`: it shows
+`provider typesafe`, `policy.ask.medium` with `typesafe/jev-1.14.0` in the
+reason, and the state digest. The key was supplied at runtime; it is not in the
+image or the repository.
+
 ## What this proves
 
 - The hosted request shape (`state`, `model`, `questions` with

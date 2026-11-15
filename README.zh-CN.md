@@ -181,6 +181,14 @@ latency 250 ms · tokens 2762 in / 17 out
 answers risk: score 0.28 (confidence 0.62)
 ```
 
+<p align="center">
+  <img src="docs/media/panel-audit-live-en.png" width="900" alt="真实托管 Jev 决策的审计页：provider typesafe、模型 jev-1.14.0、plan.clarity medium">
+  <br>
+  <sub><b>一次真实托管 Jev 决策</b>——2026-11-15 从真实面板截取：
+  `provider: typesafe`、`model jev-1.14.0`、`plan.clarity` medium 0.28。key 只在运行时
+  提供、从不落盘；与上面五张可复现截图不同，重拍这一张需要 TypeSafe 凭据。</sub>
+</p>
+
 要调用托管的 TypeSafe System One 端点：保持 `mode: shadow`，设置
 `ATTEST_JEV_PROVIDER=typesafe` 与 `ATTEST_JEV_API_KEY`（可选
 `ATTEST_JEV_BASE_URL`、`ATTEST_JEV_MODEL`），先用 `attest audit outcome` 记录几份

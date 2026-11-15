@@ -192,6 +192,15 @@ latency 250 ms · tokens 2762 in / 17 out
 answers risk: score 0.28 (confidence 0.62)
 ```
 
+<p align="center">
+  <img src="docs/media/panel-audit-live-en.png" width="900" alt="The live AUDIT page with a hosted Jev decision: provider typesafe, model jev-1.14.0, plan.clarity medium">
+  <br>
+  <sub><b>A live hosted Jev decision</b> — captured from the real panel on 2026-11-15:
+  `provider: typesafe`, `model jev-1.14.0`, `plan.clarity` medium at 0.28. The key was
+  supplied at runtime and never stored; unlike the five reproducible frames above,
+  this capture needs a TypeSafe credential to recreate.</sub>
+</p>
+
 To call the hosted TypeSafe System One endpoint, keep `mode: shadow`, set
 `ATTEST_JEV_PROVIDER=typesafe` and `ATTEST_JEV_API_KEY` (optionally
 `ATTEST_JEV_BASE_URL` and `ATTEST_JEV_MODEL`), record a few

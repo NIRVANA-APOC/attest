@@ -1,9 +1,12 @@
 # The screenshot harness
 
-This directory produces the real panel screenshots referenced by `README.md`,
-`README.zh-CN.md` and the docs: `docs/media/panel-case-en.png`,
+This directory produces the reproducible panel screenshots referenced by
+`README.md` and `README.zh-CN.md`: `docs/media/panel-case-en.png`,
 `panel-plan-en.png`, `panel-roles-en.png`, `panel-audit-en.png` and
 `panel-case-zh.png` (120x40 terminal cells, rendered at 2x: 2448x1648 px each).
+A sixth image, `panel-audit-live-en.png`, records a **live hosted Jev** decision
+and is captured separately because it needs a TypeSafe credential; see
+[The live Jev capture](#the-live-jev-capture).
 
 They are **not mockups**. The case, plan, approvals, dispatches, commits,
 results, run log and audit ledger all come from the real CLI and the real
@@ -87,6 +90,25 @@ at the end unless `--keep` is given.
 
 The case is the same one as [`examples/demo`](../../examples/demo/README.md);
 if that plan changes, recapture the screenshots that show it.
+
+## The live Jev capture
+
+`panel-audit-live-en.png` is a real AUDIT page with `provider: typesafe`,
+returned by `api.typesafe.ai` (`jev-1.14.0`). It is not produced by `capture.mjs`
+because it needs `ATTEST_JEV_API_KEY` and makes two billed calls. To recreate it:
+
+```sh
+# in a scratch repo with a checked case whose plan says provider: typesafe
+ATTEST_JEV_API_KEY=… node dist/cli.js gate plan "Live Jev check" --no-wait -m <case>
+tmux -L live-shot new-session -d -s live -x 120 -y 40 \
+  "cd <repo> && LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 node <attest>/dist/cli.js panel -m <case> --no-anim"
+tmux -L live-shot send-keys -t live 6       # AUDIT tab
+tmux -L live-shot capture-pane -ep -t live > frame.ansi
+python3 render.py frame.ansi panel-audit-live-en.png --scale 2
+```
+
+The key is read from the environment only and never appears in the frame or the
+repository. The run is recorded in `docs/dev/jev-live-verification.md`.
 
 ## Rendering
 
