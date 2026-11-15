@@ -27,7 +27,8 @@ agent 团队里的判断看起来都很小：这份计划危险吗？这个角�
 里公开的接口形状。
 
 Attest 不依赖远程决策模型也能工作：默认提供方是确定性的离线启发式，远程的
-Jev 兼容提供方只是可选项。两者架构一致——答案只是策略的信号，从来不是授权。
+TypeSafe System One 远程提供方只是可选项。两者架构一致——答案只是策略的信号，从来不是授权。
+仓库中的演示案件与截图运行的是离线启发式，画面里没有托管 Jev 调用。
 
 ## 带类型的决策模型是什么
 
@@ -259,12 +260,21 @@ questions 为全部决策 id。未知键或非法值不会抛错——采用安�
 **默认——离线启发式。** 加上前面的配置块并设 `provider: heuristic`：不需要
 key、不联网、无额外依赖。在团队读过几份审计报告之前，推荐保持这个设置。
 
-**可选——Jev 兼容的 HTTP 端点。**
+**可选——托管的 TypeSafe System One 端点。** 设 `provider: typesafe` 后，
+Attest 会向 `POST https://api.typesafe.ai/v1/systemone` 发送
+`{state, model, questions}`，把每个问题映射为公开的
+`type` / `instructions` / `criteria` 形状，并读取公开的 `answers` 信封
+（`noul`、`score` + `legend`、`choice` + `probabilities`）以及 `model` 和
+`usage`。2026-11-15 的一次真实冒烟测试返回 `jev-1.14.0`：
+`plan.risk` 0.12（low）、`plan.clarity` 0.2775（medium），耗时 639 ms /
+250 ms，输入 token 2,726 / 2,762。一次运行不构成校准研究；证据记录在
+`docs/dev/jev-live-verification.md`。可用
+`ATTEST_JEV_API_KEY=… node tools/jev-live-check.mjs` 复现。
 
 | 环境变量 | 含义 | 默认值 |
 | --- | --- | --- |
 | `ATTEST_JEV_API_KEY` | 端点凭据，永不写日志 | `typesafe` 提供方必需 |
-| `ATTEST_JEV_BASE_URL` | Jev 兼容 API 的基地址 | `https://api.typesafe.ai` |
+| `ATTEST_JEV_BASE_URL` | API 源地址；客户端追加 `/v1/systemone` | `https://api.typesafe.ai` |
 | `ATTEST_JEV_MODEL` | 请求里带的模型名 | `jev-latest` |
 | `ATTEST_JEV_TIMEOUT_MS` | 单次调用超时（毫秒） | `8000` |
 | `ATTEST_JEV_MODE` | 覆盖计划里的 `audit.mode` | 计划值 |
@@ -289,6 +299,9 @@ key、不联网、无额外依赖。在团队读过几份审计报告之前，�
 
 ## 来源
 
+- [TypeSafe System One API 参考](https://docs.typesafe.ai/api/system-one)
+  ——`POST /v1/systemone`、`state` / `model` / `questions` 请求、带类型的
+  `answers` 信封与 `usage`；Attest 实现的请求/响应形状。
 - [Jev harness：agent 循环里的那些决策](https://jev-agent.com/jev-harness)
   ——harness 模式、单次实测数字，以及 32k token 与"指令放在问题里"的约束。
 - [Decision Models for Guardrails: Exploring Jev and Kev for Moderation](https://blog.ai.gov.sg/decision-models-for-guardrails-exploring-jev-and-kev-for-moderation/)
@@ -304,4 +317,4 @@ key、不联网、无额外依赖。在团队读过几份审计报告之前，�
   工作量指标。
 
 Attest 是独立实现，与 TypeSafe AI 没有隶属或背书关系；只有运维者主动配置时，
-可选的提供方才会与 Jev 兼容的 API 通信。
+可选的提供方才会与 TypeSafe System One API 通信。

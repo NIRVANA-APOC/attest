@@ -183,8 +183,10 @@ audit:
 什么都不记录。非法值会回到安全默认值而不是让计划失败，问题由
 `attest audit report` 报出。`ATTEST_JEV_MODE` 与 `ATTEST_JEV_PROVIDER` 可覆盖配置
 做实验；远程提供方用 `ATTEST_JEV_API_KEY`、`ATTEST_JEV_BASE_URL`、
-`ATTEST_JEV_MODEL` 与 `ATTEST_JEV_TIMEOUT_MS` 配置。决策、信任边界与校准的完整
-说明见 [Jev 审计](jev-audit.zh-CN.md)。
+`ATTEST_JEV_MODEL` 与 `ATTEST_JEV_TIMEOUT_MS` 配置，并已对托管的
+`/v1/systemone` 端点做过真实联调（见
+[联调证据](dev/jev-live-verification.md)）。决策、信任边界与校准的完整说明见
+[Jev 审计](jev-audit.zh-CN.md)。
 
 ## 命令参考
 
@@ -388,7 +390,9 @@ macOS 上用 Node 20 与 22 跑，并额外在空 locale 下跑一次，以捕�
 - **身份扫描。** `scripts/check-names.mjs` 拒绝仓库里出现旧项目身份；
   `npm run check` 会运行它。
 - **截图。** `docs/media/*.png` 是 tmux 里真实 `attest panel` 帧，用 Pillow 渲染。
-  流程与依赖见 [tools/screenshot](../tools/screenshot/README.md)。
+  图中的 agent 会话是脚本替身，审计决策来自离线 `heuristic` 提供方；画面不包含
+  真实厂商 agent 或托管 Jev API。流程与依赖见
+  [tools/screenshot](../tools/screenshot/README.md)。
 - **文档契约。** `tests/docs-contract.node.mjs` 检查文档里出现的命令确实存在于
   `attest --help`、每个本地图片引用都存在，以及两个 README 引用同一组截图。
 

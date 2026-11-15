@@ -195,8 +195,10 @@ default rather than failing the plan, and the problems are reported by
 `attest audit report`. `ATTEST_JEV_MODE` and `ATTEST_JEV_PROVIDER` override the
 block for experiments; the remote provider is configured with
 `ATTEST_JEV_API_KEY`, `ATTEST_JEV_BASE_URL`, `ATTEST_JEV_MODEL` and
-`ATTEST_JEV_TIMEOUT_MS`. Decisions, the trust boundary and calibration are
-explained in [the Jev audit](jev-audit.md).
+`ATTEST_JEV_TIMEOUT_MS`, and has been live-verified against the hosted
+`/v1/systemone` endpoint (see
+[the live evidence](dev/jev-live-verification.md)). Decisions, the trust
+boundary and calibration are explained in [the Jev audit](jev-audit.md).
 
 ## Command reference
 
@@ -426,7 +428,9 @@ and 22, and once with an empty locale to catch locale-dependent output.
 - **Identity scan.** `scripts/check-names.mjs` refuses the retired project
   identity anywhere in the repository; `npm run check` runs it.
 - **Screenshots.** `docs/media/*.png` are real `attest panel` frames captured
-  from tmux and rendered with Pillow. See
+  from tmux and rendered with Pillow. The agent sessions in them are scripted
+  demo adapters, and their audit decisions use the offline `heuristic` provider;
+  no vendor agent or hosted Jev API is shown. See
   [tools/screenshot](../tools/screenshot/README.md) for the pipeline and its
   requirements.
 - **Docs contract.** `tests/docs-contract.node.mjs` checks that commands shown

@@ -9,7 +9,7 @@
 export type JevQuestion =
   | { kind: 'noul'; question: string; instructions?: string }
   | { kind: 'choice'; question: string; options: string[]; instructions?: string }
-  | { kind: 'score'; question: string; levels: number; instructions?: string }
+  | { kind: 'score'; question: string; levels: number; criteria?: string[]; instructions?: string }
 
 export type JevQuestions = Record<string, JevQuestion>
 
@@ -90,6 +90,8 @@ export type JevOutcome = {
   action: JevAction
   reason: string
   latencyMs: number
+  /** Reported by a hosted provider, when it returns token usage. */
+  usage?: { inputTokens?: number; outputTokens?: number }
   error?: string
   /** Stable reason code for the panel; `reason` stays the human sentence. */
   reasonCode?: JevReasonCode | string

@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>一个 agent 做计划，一支团队并行开工，只交付被人确认过的东西。</b><br>
-  每个角色都有自己的 tmux 窗口和 git worktree，决策由 Jev 参与把关，
+  每个角色都有自己的 tmux 窗口和 git worktree，决策由 Jev/System One 决策层参与把关，
   并留下一份可发现篡改的审计账本。
 </p>
 
@@ -27,7 +27,7 @@ Attest 0.1.0 · MIT · 运行在 tmux 里 · 支持 Claude Code 与 Codex · 不
 - **不同 agent，同一道关卡。** Claude Code 与 Codex 可以混用，每个角色的模型、
   强度、权限独立设置。默认流程里有审查者逐分支检查，开 MR 前和清理前都会停下来
   等你确认。
-- **决策可以事后审。** 可选的 Jev 兼容决策层会评估计划风险、角色边界、结果
+- **决策可以事后审。** 可选的 Jev/System One 决策层会评估计划风险、角色边界、结果
   保真度、合并风险与清理安全性；每条决策写入哈希链账本，`attest audit verify`
   校验链，`attest audit report` 写出 MR 关卡所依据的证据。信号始终只是信号：
   账本不能授权合并。
@@ -36,8 +36,13 @@ Attest 0.1.0 · MIT · 运行在 tmux 里 · 支持 Claude Code 与 Codex · 不
   <img src="docs/media/panel-case-zh.png" width="900" alt="Attest 的任务页：角色实时状态、阶段、动态、团队流程与所选角色的详情">
   <br>
   <sub><b>任务页</b>——两个构建者已完成，审查者正在等你，前面是审计阶段。
-  这是真实面板的截图；生成方式见 <a href="tools/screenshot/">tools/screenshot</a>。</sub>
+  截取自真实面板进程；生成方式见 <a href="tools/screenshot/">tools/screenshot</a>。</sub>
 </p>
+
+> **截图里哪些是真的。** 面板、CLI、git worktree、提交、运行日志与审计账本都是
+> Attest 的真实输出；图中的 agent 会话是脚本替身（`tools/screenshot/demo/agent.mjs`），
+> 这样无需登录 Claude Code 或 Codex 也能复现截图；角色与模型标签来自演示计划的
+> adapter 字段。审计相关截图使用的是默认离线 `heuristic` 提供方，不是托管的 Jev API。
 
 ## 快速开始
 
@@ -98,7 +103,7 @@ attest up -m storefront-search --orch claude
 多数多 agent 工具停在"agent 说它做完了"。Attest 多问一句：*这件事该发生吗？
 事后能证明当时决定了什么吗？*
 
-计划里可选的 `audit:` 配置块会启用 Jev 兼容的决策层：
+计划里可选的 `audit:` 配置块会启用 Jev/System One 决策层：
 
 ```yaml
 audit:
@@ -123,6 +128,66 @@ attest audit calibrate       # 有结果样本后给出 Brier 分数与可靠性
 从不授权**：关卡、权限与审查仍然决定一切；提供方出错时 fail-safe（询问，绝不放
 行）。**提供方由你选择**：默认是离线启发式；HTTP 提供方需要显式开启，且有大小、
 超时与日志边界。
+
+### 看它跑起来，以及审计截图用的是什么
+
+截图与默认安装使用的是 `provider: heuristic`：它是同一套带类型决策契约背后的
+确定性离线提供方，**不是**托管的 Jev 模型；每条决策都记录 `provider: heuristic`，
+两者不会被混淆。下面是一段来自演示案件的删节运行记录：
+
+```sh
+$ attest gate plan "Approve the search and dark-theme plan" --no-wait -m storefront-search
+Opened gate plan
+$ attest audit verify -m storefront-search
+OK 2 records
+Verify record 2 appended.
+$ attest audit report -m storefront-search
+# Audit: storefront-search
+
+- Chain: OK 3 records
+- Mode: shadow · provider: heuristic
+- Decisions: 2 · allow 0 · ask 0 · block 0 · shadow 2
+- Bands: low 1 · medium 0 · high 1 · unknown 0
+- Risk: high
+- Verdict: 2 decision(s) recorded in shadow mode; nothing was refused
+```
+
+`enforce` 模式下 high 分会直接拦住关卡。把 `git push --force origin main` 写进角色
+说明后，确定性预检会胜出，账本如实记录（两段输出之间重置过账本；路径与哈希有删节）：
+
+```sh
+$ ATTEST_JEV_MODE=enforce attest gate plan "Ship it?" --no-wait -m storefront-search
+plan gate: audit plan.clarity: high 0.93 (heuristic) → block: policy.block.high: …
+# exit 1
+$ attest audit show 0 -m storefront-search
+seq 0 · plan.risk · …
+band high · action block · provider precheck · risk —
+state sha256:…
+reason precheck.force-push: state names a force push; the deterministic rule decides, the model is not consulted
+```
+
+一次真实托管运行（2026-11-15，key 只在运行时提供；账本与上面的启发式示例分开）
+会记录版本化模型、耗时与 token 用量：
+
+```sh
+$ ATTEST_JEV_PROVIDER=typesafe ATTEST_JEV_API_KEY=… attest gate plan "Live Jev check" --no-wait -m storefront-search
+Opened gate plan
+$ attest audit show 0 -m storefront-search
+band low · action shadow · provider typesafe/jev-1.14.0 · risk 0.12
+latency 639 ms · tokens 2726 in / 20 out
+$ attest audit show 1 -m storefront-search
+band medium · action shadow · provider typesafe/jev-1.14.0 · risk 0.28
+latency 250 ms · tokens 2762 in / 17 out
+answers risk: score 0.28 (confidence 0.62)
+```
+
+要调用托管的 TypeSafe System One 端点：保持 `mode: shadow`，设置
+`ATTEST_JEV_PROVIDER=typesafe` 与 `ATTEST_JEV_API_KEY`（可选
+`ATTEST_JEV_BASE_URL`、`ATTEST_JEV_MODEL`），先用 `attest audit outcome` 记录几份
+人工结论，等报告里的校准有意义后再切到 `enforce`。该提供方已对
+`POST /v1/systemone`（`jev-1.14.0`）做过真实联调，脱敏证据见
+[docs/dev/jev-live-verification.md](docs/dev/jev-live-verification.md)。请求/响应
+契约、限制与完整命令参考见 [Jev 审计指南](docs/jev-audit.zh-CN.md)。
 
 <p align="center">
   <img src="docs/media/panel-audit-en.png" width="900" alt="Attest 面板的审计页：链状态、模式与提供方、风险结论、分级计数、决策表、原因与校准条">
@@ -218,6 +283,9 @@ Claude Code 角色会装上生命周期钩子（`UserPromptSubmit`、`Permission
 - **启发式不是 Jev。** 默认提供方是 Attest 自己的确定性打分，标记为
   `provider: heuristic`。校准按案件、根据记录的结果计算，初期很稀疏；
   `audit calibrate` 会直说样本不足，而不是猜。
+- **截图不是厂商会话。** 面板帧是真实 CLI 输出，但其中的 agent 二进制是脚本替身，
+  审计决策来自离线启发式。它们展示的是产品界面，不是真实负载下的 Claude Code、
+  Codex 或托管 Jev 模型。
 - **决策模型会被攻击。** 公开研究表明提示注入与对抗后缀可以操纵 Jev 类决策。
   Attest 把指令排除在状态之外、优先确定性规则、失败即安全——但不要把机密或不可信
   内容送进远程提供方。

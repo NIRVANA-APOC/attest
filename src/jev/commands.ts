@@ -116,9 +116,12 @@ const show = (m: AuditCase, options: AuditCommandOptions): Reply => {
   const outcome = entry.outcome
   const probability = outcome.answers.risk?.probability
   const answers = Object.entries(outcome.answers).map(([key, answer]) => `${key}: ${answer.kind}${answer.probability === undefined ? '' : ` ${answer.probability.toFixed(2)}`}${answer.choice === undefined ? '' : ` ${answer.choice}`}${answer.confidence === undefined ? '' : ` (confidence ${answer.confidence.toFixed(2)})`}`)
+  const usage = outcome.usage === undefined ? ''
+    : ` · tokens ${outcome.usage.inputTokens ?? '—'} in / ${outcome.usage.outputTokens ?? '—'} out`
   const lines = [
     `seq ${entry.seq} · ${outcome.id} · ${outcome.at || entry.at}`,
     `band ${outcome.band} · action ${outcome.action} · provider ${outcome.provider}${outcome.model === undefined ? '' : `/${outcome.model}`} · risk ${probability === undefined ? '—' : probability.toFixed(2)}`,
+    `latency ${outcome.latencyMs} ms${usage}`,
     `state ${outcome.stateDigest}`,
     `reason ${outcome.reason}`,
     ...(answers.length === 0 ? [] : [`answers ${answers.join(' · ')}`]),

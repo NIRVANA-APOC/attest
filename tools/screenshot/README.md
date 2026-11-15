@@ -16,6 +16,10 @@ without Claude Code or Codex signed in can reproduce the frames. It prints a
 plausible session tail and stays alive; the harness writes each role's real
 commit and result file separately.
 
+The demo case's `audit:` block uses `provider: heuristic`, so the audit frames
+show Attest's offline provider, not a hosted Jev API; no external service is
+called during a capture.
+
 ## Requirements
 
 - **tmux**, **git**, **Node.js 20+**

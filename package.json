@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
-  "description": "One command calls up an attested agent team: each role in its own tmux window and git worktree, with Jev-gated decisions and a tamper-evident audit ledger",
+  "description": "One command calls up an attested agent team: each role in its own tmux window and git worktree, with Jev/System One decision gates and a tamper-evident audit ledger",
   "keywords": [
     "claude-code",
     "codex",

@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>Plan with one agent. Build with a team. Land only what a person attested.</b><br>
-  Each role in its own tmux window and git worktree, with Jev-gated decisions and a
+  Each role in its own tmux window and git worktree, with Jev-style decision gates and a
   tamper-evident audit ledger.
 </p>
 
@@ -28,7 +28,7 @@ Attest 0.1.0 · MIT · runs in tmux · Claude Code and Codex · no cloud service
 - **Different agents, one gate.** Mix Claude Code and Codex, models and effort per role.
   The default workflow has a reviewer check each branch as it lands, and stops for you
   before the MR and before cleanup.
-- **Decisions you can audit.** An optional Jev-compatible decision layer rates plan
+- **Decisions you can audit.** An optional Jev/System One decision layer rates plan
   risk, role boundaries, result fidelity, merge risk and teardown safety. Each rating
   lands in a hash-chained ledger; `attest audit verify` checks the chain and
   `attest audit report` writes the evidence the MR gate rests on. Signals stay signals:
@@ -38,8 +38,15 @@ Attest 0.1.0 · MIT · runs in tmux · Claude Code and Codex · no cloud service
   <img src="docs/media/panel-case-en.png" width="900" alt="The Attest case page: roles with live states, stages, activity, the flow of the team and the selected role's detail">
   <br>
   <sub><b>The case page</b> — two builders done, the reviewer waiting on you, the audit stage ahead.
-  Real panel output captured from a running case; see <a href="tools/screenshot/">tools/screenshot</a>.</sub>
+  Captured from the real panel process; see <a href="tools/screenshot/">tools/screenshot</a>.</sub>
 </p>
+
+> **What is real in these frames.** The panel, CLI, git worktrees, commits, run log
+> and audit ledger are real Attest output. The agent sessions are scripted demo
+> adapters (`tools/screenshot/demo/agent.mjs`) so the frames reproduce without a
+> signed-in Claude Code or Codex; the role and model labels come from the demo
+> plan's adapter fields. The audit frames use the default offline `heuristic`
+> provider, not the hosted Jev API.
 
 ## Quick start
 
@@ -102,7 +109,7 @@ It creates the case worktree, starts the orchestrator in it, and opens the panel
 Most multi-agent tools stop at "the agent said it is done". Attest adds a second
 question: *should this have happened, and can you prove afterwards what was decided?*
 
-The optional `audit:` block in a plan turns on a Jev-compatible decision layer:
+The optional `audit:` block in a plan turns on a Jev/System One decision layer:
 
 ```yaml
 audit:
@@ -129,6 +136,71 @@ and the model is not consulted. **Answers are signals, never authorization**: ga
 permissions and review still decide, and a provider error fails safe (ask, never
 allow). **The provider is your choice**: the offline heuristic is the default; the
 HTTP provider is opt-in, bounded and logged.
+
+### See it run, and what the screenshots use
+
+The screenshots and a default install use `provider: heuristic`: a deterministic,
+offline provider behind the same typed-decision contract. It is **not** the hosted
+Jev model, and every decision records `provider: heuristic` so the two cannot be
+confused. An abridged run on the demo case:
+
+```sh
+$ attest gate plan "Approve the search and dark-theme plan" --no-wait -m storefront-search
+Opened gate plan
+$ attest audit verify -m storefront-search
+OK 2 records
+Verify record 2 appended.
+$ attest audit report -m storefront-search
+# Audit: storefront-search
+
+- Chain: OK 3 records
+- Mode: shadow · provider: heuristic
+- Decisions: 2 · allow 0 · ask 0 · block 0 · shadow 2
+- Bands: low 1 · medium 0 · high 1 · unknown 0
+- Risk: high
+- Verdict: 2 decision(s) recorded in shadow mode; nothing was refused
+```
+
+In `enforce` mode a high band stops the gate. With `git push --force origin main`
+written into a role's brief, the deterministic pre-check wins and the ledger says
+so (the ledger was reset between the two excerpts; paths and hashes are trimmed):
+
+```sh
+$ ATTEST_JEV_MODE=enforce attest gate plan "Ship it?" --no-wait -m storefront-search
+plan gate: audit plan.clarity: high 0.93 (heuristic) → block: policy.block.high: …
+# exit 1
+$ attest audit show 0 -m storefront-search
+seq 0 · plan.risk · …
+band high · action block · provider precheck · risk —
+state sha256:…
+reason precheck.force-push: state names a force push; the deterministic rule decides, the model is not consulted
+```
+
+A live hosted run (2026-11-15, key supplied at runtime; this ledger is separate
+from the heuristic excerpts above) records the versioned model, latency and token
+usage:
+
+```sh
+$ ATTEST_JEV_PROVIDER=typesafe ATTEST_JEV_API_KEY=… attest gate plan "Live Jev check" --no-wait -m storefront-search
+Opened gate plan
+$ attest audit show 0 -m storefront-search
+band low · action shadow · provider typesafe/jev-1.14.0 · risk 0.12
+latency 639 ms · tokens 2726 in / 20 out
+$ attest audit show 1 -m storefront-search
+band medium · action shadow · provider typesafe/jev-1.14.0 · risk 0.28
+latency 250 ms · tokens 2762 in / 17 out
+answers risk: score 0.28 (confidence 0.62)
+```
+
+To call the hosted TypeSafe System One endpoint, keep `mode: shadow`, set
+`ATTEST_JEV_PROVIDER=typesafe` and `ATTEST_JEV_API_KEY` (optionally
+`ATTEST_JEV_BASE_URL` and `ATTEST_JEV_MODEL`), record a few
+`attest audit outcome` verdicts, then move to `enforce` once the report's
+calibration is meaningful. The provider has been live-verified against
+`POST /v1/systemone` (`jev-1.14.0`); the sanitized evidence is in
+[docs/dev/jev-live-verification.md](docs/dev/jev-live-verification.md). The
+request/response contract, its caveats and the full command reference are in
+[the Jev audit guide](docs/jev-audit.md).
 
 <p align="center">
   <img src="docs/media/panel-audit-en.png" width="900" alt="The Attest panel's AUDIT page: chain status, mode and provider, risk verdict, band counts, decision table, reasons and calibration bars">
@@ -232,6 +304,10 @@ the hash-chained ledger, and the typed decision protocol. See
   scoring, labelled `provider: heuristic`. Calibration is measured per case from
   recorded outcomes and is sparse at first; `audit calibrate` says so rather than
   guessing.
+- **The screenshots are not vendor sessions.** The panel frames are real CLI
+  output, but the agent binaries in them are scripted adapters and the audit
+  decisions come from the offline heuristic. They demonstrate the product surface,
+  not Claude Code, Codex or the hosted Jev model under load.
 - **Decision models can be attacked.** Published work shows prompt injection and
   adversarial suffixes can manipulate Jev-style decisions. Attest keeps instructions
   out of the state, prefers deterministic rules, and fails safe — but do not feed

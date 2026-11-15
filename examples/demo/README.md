@@ -42,8 +42,11 @@ template clean too; this demo is a fuller, practical example.
 
 ## How the README screenshots use it
 
-The README screenshots are real panel output, not mockups. The capture
-workflow in `tools/screenshot/capture.mjs` builds a scratch repository,
+The README screenshots are real panel output, not mockups. The panel, CLI,
+worktrees, commits and ledger are real; the **agents are scripted adapters**
+(`tools/screenshot/demo/agent.mjs`), and the audit block uses the offline
+`heuristic` provider rather than a hosted Jev API. The capture workflow in
+`tools/screenshot/capture.mjs` builds a scratch repository,
 creates the case with the real CLI, and copies this plan to
 `docs/cases/storefront-search/plan.md` in the case worktree (it uses this
 path by default). It then approves the plan gate, dispatches the roles with

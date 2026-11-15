@@ -107,7 +107,7 @@ const mockServer = async (t, reply) => {
 
   return { calls, url: `http://127.0.0.1:${port}` }
 }
-const okReply = probability => ({ body: { model: 'jev-mock-1', answers: { risk: { kind: 'noul', probability, confidence: 0.7 } } } })
+const okReply = probability => ({ body: { model: 'jev-mock-1', answers: { risk: { type: 'noul', noul: probability } }, usage: { input_tokens: 12, output_tokens: 3 } } })
 
 // ---------------------------------------------------------------------------
 // 1. Ledger: chain, canonical JSON, tamper, truncation.
@@ -412,15 +412,45 @@ test('typesafe: posts the typed-question protocol with a bearer key and delimite
   assert.equal(mock.calls.length, 1)
   const call = mock.calls[0]
   assert.equal(call.method, 'POST')
-  assert.equal(call.url, '/v1/decisions')
+  assert.equal(call.url, '/v1/systemone')
   assert.equal(call.headers.authorization, 'Bearer test-key')
   assert.equal(call.body.model, 'jev-latest')
-  assert.equal(call.body.truncated, false)
+  assert.equal(call.body.questions.risk.type, 'noul')
+  assert.ok([...call.body.questions.risk.instructions].length > 0)
   assert.ok(call.body.state.startsWith('<attest-state untrusted="true">'))
   assert.ok(call.body.state.endsWith('</attest-state>'))
   assert.ok(call.body.state.length <= MAX_STATE_CHARS)
-  assert.equal(call.body.questions.risk.kind, 'noul')
-  assert.ok(call.body.questions.risk.instructions.length > 0)
+  assert.equal(result.usage.inputTokens, 12)
+  assert.equal(result.usage.outputTokens, 3)
+})
+
+test('typesafe: a score answer is normalized from its legend into the 0..1 risk band', async t => {
+  const mock = await mockServer(t, () => ({ body: {
+    model: 'jev-mock-1',
+    answers: { risk: { type: 'score', score: 3.5, legend: { '0': 'none', '1': 'little', '2': 'some', '3': 'high', '4': 'severe' }, confidence: 0.9 } },
+    usage: { input_tokens: 20, output_tokens: 8 },
+  } }))
+  const provider = typeSafeProvider({ baseUrl: mock.url, apiKey: 'test-key' })
+  const result = await provider.decide({ id: 'plan.clarity', state: { plan: 'x' }, questions: QUESTIONS['plan.clarity'] })
+  assert.equal(result.answers.risk.kind, 'score')
+  assert.ok(Math.abs((result.answers.risk.probability ?? 0) - 0.875) < 1e-9)
+  assert.equal(result.answers.risk.confidence, 0.9)
+  const sent = mock.calls[0].body
+  assert.equal(sent.questions.risk.type, 'score')
+  assert.equal(sent.questions.risk.criteria.length, 5)
+})
+
+test('typesafe: a choice answer keeps the option and its confidence', async t => {
+  const questions = { route: { kind: 'choice', question: 'Which review depth?', options: ['light', 'normal', 'deep'] } }
+  const mock = await mockServer(t, () => ({ body: { model: 'jev-mock-1', answers: { route: { type: 'choice', choice: 'deep', probabilities: { light: 0.05, normal: 0.05, deep: 0.9 }, confidence: 0.86 } } } }))
+  const provider = typeSafeProvider({ baseUrl: mock.url, apiKey: 'test-key' })
+  const result = await provider.decide({ id: 'review.triage', state: { diff: 'auth change' }, questions })
+  assert.equal(result.answers.route.choice, 'deep')
+  assert.equal(result.answers.route.probability, 0.9)
+  assert.equal(result.answers.route.confidence, 0.86)
+  const sent = mock.calls[0].body
+  assert.deepEqual(sent.questions.route.criteria, { light: null, normal: null, deep: null })
+  assert.ok(typeof sent.questions.route.instructions === 'string' || Array.isArray(sent.questions.route.instructions))
 })
 
 test('typesafe: caps the state at 32,000 characters with an explicit marker', async t => {
@@ -433,8 +463,6 @@ test('typesafe: caps the state at 32,000 characters with an explicit marker', as
   const provider = typeSafeProvider({ baseUrl: mock.url, apiKey: 'test-key' })
   await provider.decide({ id: 'plan.risk', state: { text: 'y'.repeat(40000) }, questions: QUESTIONS['plan.risk'] })
   sent = mock.calls[0].body
-  assert.equal(sent.truncated, true)
-  assert.ok(sent.stateOriginalChars > MAX_STATE_CHARS)
   assert.ok(sent.state.length <= MAX_STATE_CHARS)
   assert.ok(sent.state.includes(TRUNCATION_MARKER))
 })
@@ -462,12 +490,12 @@ test('typesafe: does not retry a 4xx and never includes the key in the error', a
 })
 
 test('typesafe: a malformed response is a typed error; the policy falls back', async t => {
-  const mock = await mockServer(t, () => ({ body: { answers: { risk: { kind: 'noul' } } } }))
+  const mock = await mockServer(t, () => ({ body: { answers: { risk: { type: 'noul' } } } }))
   const provider = typeSafeProvider({ baseUrl: mock.url, apiKey: 'test-key', retryDelayMs: 5 })
   await assert.rejects(provider.decide({ id: 'plan.risk', state: { text: 'x' }, questions: QUESTIONS['plan.risk'] }), error => error instanceof TypeSafeError && error.kind === 'malformed')
   const outcome = await decide(policyInput(), { mode: 'enforce', provider: 'typesafe' }, { typesafe: typeSafeProvider({ baseUrl: mock.url, apiKey: 'test-key', retryDelayMs: 5 }), heuristic: fixedProvider(0.3), prechecks: false })
   assert.equal(outcome.provider, 'heuristic')
-  assert.match(outcome.error, /typesafe: .*probability/)
+  assert.match(outcome.error, /typesafe: .*/)
 })
 
 test('typesafe: a missing key is a config error before any request', async () => {

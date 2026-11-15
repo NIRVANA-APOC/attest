@@ -32,9 +32,10 @@ for agent loops, and the shape LangChain exposed in
 [`langchain-typesafe`](https://www.langchain.com/blog/building-a-harness-with-jev).
 
 Attest does not require a remote decision model to work. The default provider
-is a deterministic offline heuristic; the remote Jev-compatible provider is an
+is a deterministic offline heuristic; the remote TypeSafe System One provider is an
 opt-in improvement. In both cases the architecture is the same: an answer is a
-signal for policy, never an authorization.
+signal for policy, never an authorization. The screenshots in this repository
+and the demo case run the offline heuristic; no hosted Jev call appears in them.
 
 ## What a typed decision model is
 
@@ -329,12 +330,21 @@ Evidence from the published material, with its own caveats:
 `provider: heuristic`. No key, no network, no dependency. This is the
 recommended setting until a team has read a few audit reports.
 
-**Optional — a Jev-compatible HTTP endpoint.**
+**Optional — the hosted TypeSafe System One endpoint.** With
+`provider: typesafe`, Attest posts `{state, model, questions}` to
+`POST https://api.typesafe.ai/v1/systemone`, mapping each question to the
+published `type` / `instructions` / `criteria` shape and reading the published
+`answers` envelope (`noul`, `score` + `legend`, `choice` + `probabilities`) plus
+`model` and `usage`. A live smoke run on 2026-11-15 returned `jev-1.14.0` for
+`plan.risk` and `plan.clarity` (0.12 low, 0.2775 medium; 639 ms and 250 ms;
+2,726 and 2,762 input tokens). One run is not a calibration study; the evidence
+is recorded in `docs/dev/jev-live-verification.md`. Run
+`ATTEST_JEV_API_KEY=… node tools/jev-live-check.mjs` to repeat the check.
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
 | `ATTEST_JEV_API_KEY` | credential for the endpoint; never logged | required for `typesafe` |
-| `ATTEST_JEV_BASE_URL` | Jev-compatible API base | `https://api.typesafe.ai` |
+| `ATTEST_JEV_BASE_URL` | API origin; the client appends `/v1/systemone` | `https://api.typesafe.ai` |
 | `ATTEST_JEV_MODEL` | model name sent in the request | `jev-latest` |
 | `ATTEST_JEV_TIMEOUT_MS` | per-call timeout in milliseconds | `8000` |
 | `ATTEST_JEV_MODE` | overrides the plan's `audit.mode` | plan value |
@@ -349,7 +359,7 @@ never allows on uncertainty. `ATTEST_JEV_PROVIDER=off` is the emergency brake.
 | --- | --- |
 | `attest audit verify [--json]` | verify the chain: `OK <n> records` (a successful non-empty verify appends an `audit-verify` record), `OK 0 records` on an empty ledger (nothing appended), `OK <n> records (incomplete final line ignored)` on a torn tail (nothing appended), or `BROKEN at record <n>: <reason>` and exit 1 |
 | `attest audit report [--json] [--write]` | the case summary. `--write` writes `docs/cases/<case>/audit.md` in the case worktree and prints `Wrote <path>` (`--json` then includes `written` as that absolute path). A broken chain exits 1 and **refuses to write**: `--json` carries `writeRefused` instead of `written`, so an unverifiable ledger never produces a published report. The report's `mode`, `provider` and verdict come from the recorded actions (`shadow` only if every action is shadow; provider is the last decision's); the plan/env config only labels an empty ledger. |
-| `attest audit show <n>` | one decision by ledger seq, or the latest for a decision id |
+| `attest audit show <n>` | one decision by ledger seq, or the latest for a decision id; includes latency and, from hosted providers, token usage |
 | `attest audit outcome <id\|seq> <allow\|ask\|block\|defect\|pass> [--note]` | append a human verdict for calibration |
 | `attest audit calibrate [--json]` | Brier score, reliability bins and advisory threshold suggestions; below five usable outcomes it reports `insufficient outcomes` and exits 0. A recalibration map needs at least 12 outcomes and a holdout split that improves the Brier score |
 
@@ -361,6 +371,9 @@ it changes no code.
 
 ## Sources
 
+- [TypeSafe System One API reference](https://docs.typesafe.ai/api/system-one)
+  — `POST /v1/systemone`, the `state` / `model` / `questions` request, the typed
+  `answers` envelope and `usage`; the request/response shapes Attest implements.
 - [Jev harness: the decisions inside an agent loop](https://jev-agent.com/jev-harness)
   — the harness pattern, measured one-run figures, and the 32k-token and
   instruction-in-the-question constraints.
@@ -378,5 +391,5 @@ it changes no code.
   and the net-human-workload measure.
 
 Attest is an independent implementation. It is not affiliated with or endorsed
-by TypeSafe AI; the optional provider speaks to a Jev-compatible API only when
-an operator configures one.
+by TypeSafe AI; the optional provider speaks to the TypeSafe System One API only
+when an operator configures one.

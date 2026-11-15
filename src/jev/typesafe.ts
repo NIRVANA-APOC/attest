@@ -96,17 +96,62 @@ export const cappedState = (state: string | Record<string, unknown>): { state: s
   return { state: `${QUESTION_PREFIX}${raw.slice(0, keep)}${TRUNCATION_MARKER}${QUESTION_SUFFIX}`, truncated: true, originalChars: raw.length }
 }
 
-const AnswerSchema = z.object({
-  kind: z.enum(['noul', 'choice', 'score']).optional(),
-  probability: z.number().min(0).max(1).optional(),
-  choice: z.string().optional(),
+// The published System One response: one answer per question id, discriminated
+// by `type`; noul answers carry `noul` (no confidence), score answers carry an
+// interpolated `score` plus legend, choice answers carry the chosen option and
+// its probability distribution.
+const NoulAnswerSchema = z.object({ type: z.literal('noul'), noul: z.number().min(0).max(1) })
+const ChoiceAnswerSchema = z.object({
+  type: z.literal('choice'),
+  choice: z.string(),
+  probabilities: z.record(z.string(), z.number().min(0).max(1)).optional(),
   confidence: z.number().min(0).max(1).optional(),
 })
+const ScoreAnswerSchema = z.object({
+  type: z.literal('score'),
+  score: z.number(),
+  legend: z.record(z.string(), z.string()).optional(),
+  probabilities: z.record(z.string(), z.number().min(0).max(1)).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+})
+const AnswerSchema = z.discriminatedUnion('type', [NoulAnswerSchema, ChoiceAnswerSchema, ScoreAnswerSchema])
 
 const ResponseSchema = z.object({
   model: z.string().optional(),
   answers: z.record(z.string(), AnswerSchema),
+  usage: z.object({ input_tokens: z.number().optional(), output_tokens: z.number().optional() }).optional(),
 })
+
+/** The published request: one state, a model, and a map of typed questions. */
+const instructionText = (question: JevQuestion): string | string[] => {
+  const parts = [question.question, question.instructions].filter((one): one is string => typeof one === 'string' && one.trim() !== '')
+
+  return parts.length === 1 ? parts[0] ?? '' : parts
+}
+
+const defaultCriteria = (levels: number): string[] =>
+  Array.from({ length: levels }, (_, index) => `level ${index + 1}${index === 0 ? ' (lowest risk)' : index === levels - 1 ? ' (highest risk)' : ''}`)
+
+const wireQuestion = (question: JevQuestion): Record<string, unknown> => {
+  if (question.kind === 'noul') return { type: 'noul', instructions: instructionText(question) }
+  if (question.kind === 'choice') {
+    return { type: 'choice', instructions: instructionText(question), criteria: Object.fromEntries(question.options.map(option => [option, null])) }
+  }
+
+  return { type: 'score', instructions: instructionText(question), criteria: question.criteria ?? defaultCriteria(question.levels) }
+}
+
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value))
+
+/** Score levels are ordered low to high risk by their criteria; normalize to 0..1. */
+const scoreRisk = (answer: z.infer<typeof ScoreAnswerSchema>, question: Extract<JevQuestion, { kind: 'score' }>): number => {
+  const levels = answer.legend === undefined ? Array.from({ length: question.levels }, (_, index) => index) : Object.keys(answer.legend).map(Number).filter(Number.isFinite)
+  const low = Math.min(...levels)
+  const high = Math.max(...levels)
+  if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) return clamp01(answer.score / Math.max(1, question.levels - 1))
+
+  return clamp01((answer.score - low) / (high - low))
+}
 
 /** Checks a parsed response against the questions that were asked; throws a malformed error. */
 const answersOf = (parsed: z.infer<typeof ResponseSchema>, questions: JevQuestions): Record<string, JevAnswer> => {
@@ -114,13 +159,18 @@ const answersOf = (parsed: z.infer<typeof ResponseSchema>, questions: JevQuestio
   for (const [key, question] of Object.entries(questions)) {
     const answer = parsed.answers[key]
     if (answer === undefined) throw new TypeSafeError('malformed', `response has no answer for question "${key}"`)
-    if (answer.kind !== undefined && answer.kind !== question.kind) throw new TypeSafeError('malformed', `answer "${key}" is a ${answer.kind}, the question is a ${question.kind}`)
-    if (question.kind === 'choice') {
-      if (answer.choice === undefined || !question.options.includes(answer.choice)) throw new TypeSafeError('malformed', `answer "${key}" is not one of the question's options`)
-      answers[key] = { kind: 'choice', choice: answer.choice, ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }) }
+    if (answer.type !== question.kind) throw new TypeSafeError('malformed', `answer "${key}" is a ${answer.type}, the question is a ${question.kind}`)
+    if (answer.type === 'noul') {
+      answers[key] = { kind: 'noul', probability: answer.noul }
+    } else if (answer.type === 'score') {
+      const score = { ...answer } as Extract<typeof answer, { type: 'score' }>
+      answers[key] = { kind: 'score', probability: scoreRisk(score, question as Extract<JevQuestion, { kind: 'score' }>), ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }) }
     } else {
-      if (answer.probability === undefined) throw new TypeSafeError('malformed', `answer "${key}" has no probability`)
-      answers[key] = { kind: question.kind, probability: answer.probability, ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }) }
+      if (question.kind !== 'choice') throw new TypeSafeError('malformed', `answer "${key}" is not one of the question's options`)
+      if (!question.options.includes(answer.choice)) throw new TypeSafeError('malformed', `answer "${key}" is not one of the question's options`)
+      const probability = answer.probabilities?.[answer.choice]
+
+      answers[key] = { kind: 'choice', choice: answer.choice, ...(probability === undefined ? {} : { probability }), ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }) }
     }
   }
 
@@ -129,17 +179,9 @@ const answersOf = (parsed: z.infer<typeof ResponseSchema>, questions: JevQuestio
 
 const requestBody = (model: string, input: JevInput): string => {
   const capped = cappedState(input.state)
-  const questions: Record<string, JevQuestion> = {}
-  for (const [key, question] of Object.entries(input.questions)) questions[key] = question
+  const questions = Object.fromEntries(Object.entries(input.questions).map(([key, question]) => [key, wireQuestion(question)]))
 
-  return JSON.stringify({
-    model,
-    state: capped.state,
-    stateChars: capped.state.length,
-    stateOriginalChars: capped.originalChars,
-    truncated: capped.truncated,
-    questions,
-  })
+  return JSON.stringify({ model, state: capped.state, questions })
 }
 
 /**
@@ -154,9 +196,9 @@ export const typeSafeProvider = (options: TypeSafeOptions = {}): JevProvider => 
     if (config.apiKey.trim() === '') throw new TypeSafeError('config', 'ATTEST_JEV_API_KEY is not set; the typesafe provider is optional and the heuristic stays the default')
     const timeoutMs = limits?.timeoutMs ?? config.timeoutMs
     const started = Date.now()
-    const endpoint = `${config.baseUrl}/v1/decisions`
+    const endpoint = /\/v1\/systemone$/.test(config.baseUrl) ? config.baseUrl : /\/v1$/.test(config.baseUrl) ? `${config.baseUrl}/systemone` : `${config.baseUrl}/v1/systemone`
     const body = requestBody(config.model, input)
-    const attempt = async (): Promise<{ answers: Record<string, JevAnswer>; model: string }> => {
+    const attempt = async (): Promise<{ answers: Record<string, JevAnswer>; model: string; usage?: { inputTokens?: number; outputTokens?: number } }> => {
       let response: Response
       try {
         response = await config.fetchImpl(endpoint, {
@@ -189,9 +231,14 @@ export const typeSafeProvider = (options: TypeSafeOptions = {}): JevProvider => 
         throw new TypeSafeError('malformed', `decision response did not match the typed protocol: ${issues}`)
       }
 
-      return { answers: answersOf(parsed, input.questions), model: parsed.model ?? config.model }
+      const usage = parsed.usage === undefined ? undefined : {
+        ...(parsed.usage.input_tokens === undefined ? {} : { inputTokens: parsed.usage.input_tokens }),
+        ...(parsed.usage.output_tokens === undefined ? {} : { outputTokens: parsed.usage.output_tokens }),
+      }
+
+      return { answers: answersOf(parsed, input.questions), model: parsed.model ?? config.model, ...(usage === undefined || Object.keys(usage).length === 0 ? {} : { usage }) }
     }
-    let result: { answers: Record<string, JevAnswer>; model: string }
+    let result: { answers: Record<string, JevAnswer>; model: string; usage?: { inputTokens?: number; outputTokens?: number } }
     try {
       result = await pRetry(attempt, {
         retries: config.retries,
@@ -215,6 +262,7 @@ export const typeSafeProvider = (options: TypeSafeOptions = {}): JevProvider => 
       stateDigest: input.stateDigest ?? digestOf(input.state),
       answers: result.answers,
       latencyMs: Math.max(0, Date.now() - started),
+      ...(result.usage === undefined ? {} : { usage: result.usage }),
     }
   },
 })

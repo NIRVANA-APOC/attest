@@ -154,15 +154,31 @@ Feature definitions (all bounded, all from state):
 - `drift`: 1 − lexical overlap of step and goal.
 - `dirty`: unmerged > unpushed > dirty > untracked, 0 when none.
 
-### 5.2 typesafe (optional)
+### 5.2 typesafe (hosted System One)
 
-POST `<baseUrl>/v1/decisions` with:
+POST `<baseUrl>/v1/systemone` with the published request shape:
 
 ```json
-{ "model": "jev-latest", "state": "<attest-state untrusted=\"true\">…</attest-state>",
-  "stateChars": 1234, "stateOriginalChars": 1234, "truncated": false,
-  "questions": { "risk": { "kind": "noul", "question": "…", "instructions": "…" } } }
+{ "model": "jev-latest",
+  "state": "<attest-state untrusted=\"true\">…</attest-state>",
+  "questions": { "risk": { "type": "noul", "instructions": "…" } } }
 ```
+
+The adapter maps Attest's internal `JevQuestion` to the wire form: `noul` keeps
+the question and instructions; `choice` supplies `criteria` as an option→null
+map; `score` supplies its ordered criteria labels (falling back to generated
+level labels). The response is the published envelope:
+
+```json
+{ "model": "jev-1.14.0",
+  "answers": { "risk": { "type": "noul", "noul": 0.12 } },
+  "usage": { "input_tokens": 2726, "output_tokens": 20 } }
+```
+
+`noul` is copied as the probability; `score` is normalized by the returned
+`legend` into the 0..1 risk band (criteria are ordered low→high risk); `choice`
+keeps the chosen option and its probability/confidence. `model`, `usage` and
+`latencyMs` are stored in the ledger decision.
 
 - Env: `ATTEST_JEV_API_KEY` (required), `ATTEST_JEV_BASE_URL` (default
   `https://api.typesafe.ai`), `ATTEST_JEV_MODEL` (default `jev-latest`),
@@ -172,12 +188,17 @@ POST `<baseUrl>/v1/decisions` with:
 - State field is capped at exactly 32,000 characters including the delimiter
   and an explicit truncation marker.
 - Response is zod-validated and checked against the questions (every key
-  answered, right kind, choice in options, probability 0..1). Malformed answers
-  are a typed `malformed` error.
+  answered, right kind, choice in options, noul/score in range). Malformed
+  answers are a typed `malformed` error.
 - `p-retry`: two retries with exponential backoff for network, timeout, 408,
   429 and 5xx; no retry for 4xx or malformed responses.
 - Any failure throws `TypeSafeError`; `policy.decide` falls back to the
   heuristic and records the error in `JevOutcome.error`.
+- **Live verification:** 2026-11-15 against `api.typesafe.ai`, model
+  `jev-1.14.0`, two plan decisions recorded end-to-end (`plan.risk` 0.12 low,
+  `plan.clarity` 0.2775 medium; 639 ms and 250 ms; usage 2,726/20 and
+  2,762/17). Evidence and sanitized output: `docs/dev/jev-live-verification.md`.
+  This is one live smoke run, not a calibration study.
 
 ### 5.3 off
 

@@ -185,6 +185,7 @@ export type JevOutcome = {
   action: JevAction             // what the policy decides
   reason: string
   latencyMs: number
+  usage?: { inputTokens?: number; outputTokens?: number } // hosted provider only
   error?: string
 }
 ```
@@ -196,13 +197,19 @@ export type JevOutcome = {
   touched paths, missing done-when evidence, diff size, reviews) and are
   calibrated by the ledger's recorded outcomes. It must be honest about being a
   heuristic: `provider` says so, `confidence` is bounded.
-- `typesafe`: optional HTTP client for a Jev-compatible decision endpoint.
-  Configuration: `ATTEST_JEV_API_KEY`, `ATTEST_JEV_BASE_URL`
-  (default `https://api.typesafe.ai`), `ATTEST_JEV_MODEL` (default
-  `jev-latest`), `ATTEST_JEV_TIMEOUT_MS` (default 8000). Validate responses
-  with zod, cap state at 32,000 characters, retry idempotent calls twice with
-  `p-retry`, never log the key. On error fall back to `heuristic` and record
-  the error in the outcome.
+- `typesafe`: the hosted System One client. It posts `{state, model, questions}`
+  to `POST {base}/v1/systemone` (base default `https://api.typesafe.ai`), with
+  questions mapped to the published wire shape (`type`, `instructions`,
+  `criteria`), and reads the published `answers` envelope (`noul`, `score` +
+  `legend`, `choice` + `probabilities`) plus `model` and `usage`.
+  Configuration: `ATTEST_JEV_API_KEY`, `ATTEST_JEV_BASE_URL`,
+  `ATTEST_JEV_MODEL` (default `jev-latest`), `ATTEST_JEV_TIMEOUT_MS` (default
+  8000). Validate responses with zod, cap state at 32,000 characters, retry
+  idempotent calls twice with `p-retry`, never log the key. Score answers are
+  normalized by their criteria/legend into the 0..1 risk band. On error fall
+  back to `heuristic` and record the error in the outcome. Live-verified against
+  `api.typesafe.ai` on 2026-11-15 (`jev-1.14.0`); see
+  `docs/dev/jev-live-verification.md`.
 - `off`: no calls, no audit rows; the audit stage reports disabled.
 
 **Security rules.** State is untrusted data. Instructions live only in the
