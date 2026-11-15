@@ -1,0 +1,15 @@
+Attest
+Copyright (c) 2026 Attest contributors
+
+This product includes software developed by third parties:
+
+- execa (MIT), https://github.com/sindresorhus/execa
+- yaml (ISC), https://github.com/eemeli/yaml
+- zod (MIT), https://github.com/colinhacks/zod
+- picocolors (ISC), https://github.com/alexeyraspopov/picocolors
+- string-width (MIT), https://github.com/sindresorhus/string-width
+- p-retry (MIT), https://github.com/sindresorhus/p-retry
+
+Attest is an independent implementation. It is not affiliated with, endorsed by,
+or derived from the TypeSafe AI Jev service; the optional remote provider speaks
+to a Jev-compatible decision API only when the operator configures one.

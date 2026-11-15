@@ -1,0 +1,52 @@
+ attest  auth-refresh  ·  Build                                 12:07   中/EN
+  1 CASE   2 ROLES   3 PLAN   4 LOG   5 DIFF
+              Refresh tokens rotate on every use, and a reused one is refused
+──────────────────────────────────────────────────────────────────────────────
+
+─ ROLES ────────────────── │ ─ FLOW ──────────────────────────────────────────
+ build                     │ ┌────────────────────────┐
+    ✓ lock        ⬢    —   │ │ ● orchestrator         │
+  └ ○ build       ⬢    —   │ └─┬──────────────────────┘
+▸   ○ review      ✻    —   │   │
+                           │   │  ┌────────────────────────┐
+─ STAGES ───────────────── │   │  │ ✓ lock            done │
+  ✓ Plan                   │   └─▶│ ⬢ codex gpt-6.1-sol    │
+  ✓ Plan OK?        10:42  │      │ ◼◼◼◻◻ high             │
+  ● Build             0/3  │      └────────────────────────┘
+  ○ Review            0/1  │        │
+  ◇ MR OK?                 │        │ after lock
+  ○ Open MR                │        │ ┌────────────────────────┐
+  ◇ Merged?                │        │ │ ○ build        planned │
+  ○ Teardown               │        └▶│ ⬢ codex gpt-6.1-sol    │
+                           │          │ ◼◼◼◻◻ high             │
+─ ACTIVITY ─────────────── │          └────────────────────────┘
+ 12:07 dispatched store    │
+ 12:07 dispatched api      │      ╔════════════════════════╗
+ 10:42 stage: build        │      ║ ○ review       planned ║
+ 10:42 plan approved       │      ║ ✻ claude opus          ║
+ 10:41 plan gate opened    │      ║ ◼◼◼◻◻ high             ║
+                           │      ║ reviews lock, build as ║
+                           │      ║ each lands             ║
+                           │      ╚════════════════════════╝
+                           │
+                           │
+                           │
+                           │ ─ ○ review · planned ────────────────────────────
+                           │  goal     Rotate the token on refresh; refuse a
+                           │           reused one with 401 reuse
+                           │  agent    ✻ claude opus   ◼◼◼◻◻ high
+                           │           -a on-request -s workspace-write
+                           │  branch   role/demo/review
+                           │  touches  — changes nothing
+                           │
+                           │  not opened yet · as each lands
+                           │  o Open window    s Send…    d Diff
+                           │
+                           │
+                           │
+                           │
+                           │
+                           │
+                           │
+
+ ↑↓  role   ⏎  detail   o  open   s  send   d  diff   1-5  tabs   ?  help

@@ -1,0 +1,26 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      # The real-tmux tests skip without tmux; macOS runners do not ship it.
+      - if: runner.os == 'macOS'
+        run: brew install tmux
+      - if: runner.os == 'Linux'
+        run: command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
+      # Agents often run attest from a shell with no UTF-8 locale; test that case.
+      - run: npm test
+        env:
+          LANG: ''
+          LC_ALL: ''
+          LC_CTYPE: ''

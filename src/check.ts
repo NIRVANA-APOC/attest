@@ -1,0 +1,57 @@
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join, relative, resolve } from 'node:path'
+
+import { loadAgents } from './agents.ts'
+import { readPlan } from './plan.ts'
+import type { Plan } from './plan.ts'
+import { run } from './run.ts'
+import type { Run } from './run.ts'
+
+// `attest check [plan]`: finds the plan and prints its problems, or that it
+// is clean. Exit 0 clean, 1 with problems, 2 when there is no plan.
+
+export const CASES = 'docs/cases'
+
+/** The repository's top folder, else `cwd` itself. */
+export const rootOf = (cwd: string, runner: Run = run): string => {
+  const found = runner('git', ['rev-parse', '--show-toplevel'], { cwd })
+
+  return found.code === 0 ? found.out.trim() : cwd
+}
+
+export const textProblems = (root: string, plan: Plan): string[] => plan.roles
+  .filter(role => role.text !== '' && !role.text.startsWith('workflow:') && !existsSync(join(root, role.text)))
+  .map(role => `role ${role.name}: text ${role.text} is not in the repository`)
+
+/** The plan `want` names: a plan file, a folder holding plan.md, or a case under docs/cases/. */
+export const findPlan = (root: string, cwd: string, want: string): { path: string } | { missing: string } => {
+  const given = resolve(cwd, want)
+  const candidates = want === '' ? [] : [given, join(given, 'plan.md'), join(root, CASES, want, 'plan.md')]
+  const path = candidates.find(one => existsSync(one) && statSync(one).isFile())
+
+  return path === undefined ? { missing: `no plan at ${want} (a plan file, a folder holding plan.md, or a case under ${CASES}/)` } : { path }
+}
+
+/** Checks the plan `want` names; its agents and role texts are read from the worktree holding it. */
+export const check = (cwd: string, want: string, home = homedir(), runner: Run = run): { out: string; code: number } => {
+  const found = findPlan(rootOf(cwd, runner), cwd, want)
+  if ('missing' in found) return { out: `attest check: ${found.missing}\n`, code: 2 }
+  const root = rootOf(dirname(found.path), runner)
+  const loaded = loadAgents(root, home)
+  const plan = readPlan(readFileSync(found.path, 'utf8'), loaded.agents)
+  // A role's text in the repository must be there; `workflow:` texts are the skill's.
+  const problems = [
+    ...loaded.problems,
+    ...plan.problems,
+    ...textProblems(root, plan),
+  ]
+  const name = relative(cwd, found.path) || found.path
+  if (problems.length === 0) {
+    const count = plan.roles.length
+
+    return { out: `${name}: clean (${count} role${count === 1 ? '' : 's'}: ${plan.roles.map(role => role.name).join(', ')})\n`, code: 0 }
+  }
+
+  return { out: `${name}: ${problems.length} problem${problems.length === 1 ? '' : 's'}\n${problems.map(one => `  - ${one}\n`).join('')}`, code: 1 }
+}

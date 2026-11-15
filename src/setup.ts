@@ -1,0 +1,74 @@
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+
+import { Refusal } from './command-context.ts'
+import type { Reply, Runtime } from './command-context.ts'
+
+export const INSTALL_MARKER = '.attest-install.json'
+export const skillTarget = (r: Runtime, agent: string): string => join(r.home, agent === 'claude' ? '.claude/skills/attest-case' : '.agents/skills/attest-case')
+export const available = (r: Runtime, command: string): boolean => r.run('which', [command]).code === 0
+
+// The package was called @attest/cli before it took the name attest-cli; copies marked either way are ours.
+const OWNERS = ['attest-cli', '@attest/cli']
+const marked = (path: string): boolean => {
+  if (!existsSync(path) || lstatSync(path).isSymbolicLink()) return false
+  try {
+    return OWNERS.includes(JSON.parse(readFileSync(join(path, INSTALL_MARKER), 'utf8')).owner)
+  } catch {
+    return false
+  }
+}
+
+export const installSkill = (r: Runtime, agent: string, remove = false): string => {
+  const target = skillTarget(r, agent)
+  if (existsSync(target) && !marked(target)) throw new Refusal(`will not ${remove ? 'remove' : 'overwrite'} ${target}: no attest install marker`)
+  if (remove) {
+    if (marked(target)) {
+      rmSync(target, { recursive: true })
+
+      return `Removed ${target}\n`
+    }
+
+    return `Not installed: ${target}\n`
+  }
+  const source = join(r.packageRoot, 'skills/attest-case')
+  if (!existsSync(join(source, 'SKILL.md'))) throw new Refusal(`package skill is missing: ${source}`)
+  mkdirSync(dirname(target), { recursive: true })
+  const staging = mkdtempSync(join(dirname(target), '.attest-install-'))
+  const backup = `${staging}-old`
+  try {
+    cpSync(source, staging, { recursive: true })
+    writeFileSync(join(staging, INSTALL_MARKER), `${JSON.stringify({ owner: 'attest-cli', source })}\n`)
+    if (existsSync(target)) renameSync(target, backup)
+    try {
+      renameSync(staging, target)
+    } catch (error) {
+      if (existsSync(backup)) renameSync(backup, target)
+      throw error
+    }
+    if (existsSync(backup)) rmSync(backup, { recursive: true })
+  } finally {
+    if (existsSync(staging)) rmSync(staging, { recursive: true })
+  }
+
+  return `Installed ${target}\n`
+}
+
+export const setup = (r: Runtime, remove = false): Reply => {
+  const agents = remove ? ['claude', 'codex'] : [
+    ...(available(r, 'claude') || existsSync(join(r.home, '.claude')) ? ['claude'] : []),
+    ...(available(r, 'codex') ? ['codex'] : []),
+  ]
+  const lines: string[] = []
+  let code = 0
+  for (const agent of agents) {
+    try {
+      lines.push(installSkill(r, agent, remove))
+    } catch (error) {
+      lines.push(`${(error as Error).message}\n`)
+      code = 1
+    }
+  }
+
+  return { code, out: lines.join('') || 'No supported harness found; nothing installed.\n' }
+}
