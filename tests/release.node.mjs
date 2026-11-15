@@ -21,7 +21,7 @@ const RETIRED_PEOPLE = [['hit', 'ianqi'].join(''), ['Tianqi', 'Zhao'].join(' ')]
 const retired = (text) => [RETIRED_WORD, RETIRED_MISSPELLING].some(word => text.toLowerCase().includes(word))
   || RETIRED_PEOPLE.some(name => text.toLowerCase().includes(name.toLowerCase()))
 const BINARY = /\.(png|jpe?g|gif|ico|webp|woff2?|ttf|otf|tgz|zip|gz|pdf|mp4|webm)$/i
-const SKIP_DIR = new Set(['node_modules', '.git', '.npm-cache', '.attest', '.qa-logs', 'coverage'])
+const SKIP_DIR = new Set(['node_modules', '.git', '.npm-cache', '.attest', '.qa-logs', 'coverage', '.scratch', '.tools'])
 
 const workspace = () => mkdtempSync(join(tmpdir(), 'attest-release-'))
 const npmCache = () => join(repo, '.npm-cache')

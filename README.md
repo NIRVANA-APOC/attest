@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>Plan with one agent. Build with a team. Land only what a person attested.</b><br>
-  Each role in its own tmux window and git worktree, with Jev-style decision gates and a
+  Each role in its own tmux window and git worktree, with Jev decision gates and a
   tamper-evident audit ledger.
 </p>
 
@@ -17,342 +17,412 @@
 
 Attest 0.1.0 · MIT · runs in tmux · Claude Code and Codex · no cloud service required
 
-## Why Attest
+## This README is a real run
 
-- **See the team, and step in.** Every role is a real Claude Code or Codex session in a
-  tmux window. One panel shows who is working, who needs you, what each branch changed
-  and what it claimed. Jump into any role's window to read along or answer it.
-- **Agree before work starts.** The orchestrator writes a plan; you approve it in the
-  panel. Roles get their own git worktree and branch cut from the case branch, and
-  planned file overlaps require an explicit order.
-- **Different agents, one gate.** Mix Claude Code and Codex, models and effort per role.
-  The default workflow has a reviewer check each branch as it lands, and stops for you
-  before the MR and before cleanup.
-- **Decisions you can audit.** An optional Jev/System One decision layer rates plan
-  risk, role boundaries, result fidelity, merge risk and teardown safety. Each rating
-  lands in a hash-chained ledger; `attest audit verify` checks the chain and
-  `attest audit report` writes the evidence the MR gate rests on. Signals stay signals:
-  the ledger never authorizes a merge.
+The screenshots and numbers below are from a live session on **2026-11-15**, not
+a mock-up. Two real coding agents built two branches in parallel, a third real
+agent reviewed them, the hosted TypeSafe Jev model made the audit decisions, and
+every frame was captured from the running tmux panes.
 
-<p align="center">
-  <img src="docs/media/panel-case-en.png" width="900" alt="The Attest case page: roles with live states, stages, activity, the flow of the team and the selected role's detail">
-  <br>
-  <sub><b>The case page</b> — two builders done, the reviewer waiting on you, the audit stage ahead.
-  Captured from the real panel process; see <a href="tools/screenshot/">tools/screenshot</a>.</sub>
-</p>
+| | |
+| --- | --- |
+| **Builders** | **Claude Code 2.1.325** (role `search`) and **Codex CLI 0.169.0** (role `theme`) |
+| **Model** | **`deepseek-flash`** for every role, via DeepSeek's Anthropic-compatible endpoint and Responses API |
+| **Reviewer** | **Claude Code 2.1.325**, `deepseek-flash` |
+| **Jev** | hosted **TypeSafe System One**, `POST /v1/systemone`, model **`jev-1.14.0`**, provider `typesafe` |
+| **Audit mode** | `shadow` — every decision recorded, nothing refused |
+| **Result** | two commits, one PASS review, two merges, **13 ledger records**, **9 Jev decisions**, **2 recorded outcomes**, MR OK gate waiting for the person |
+| **Env** | Node 26.13, tmux 3.8, Linux; API keys only in environment variables |
 
-> **What is real in these frames.** The panel, CLI, git worktrees, commits, run log
-> and audit ledger are real Attest output. The agent sessions are scripted demo
-> adapters (`tools/screenshot/demo/agent.mjs`) so the frames reproduce without a
-> signed-in Claude Code or Codex; the role and model labels come from the demo
-> plan's adapter fields. The audit frames use the default offline `heuristic`
-> provider, not the hosted Jev API.
+![The live Attest panel during the run: two real agents working in parallel](docs/media/live-build-working.png)
 
-## Quick start
+<p align="center"><sub><b>The panel during the real build.</b> The two role cards are live
+sessions: Claude Code on <code>deepseek-flash</code> (search) and Codex on
+<code>deepseek-flash</code> (theme). The flow shows both roles working at once; the stage
+strip has already passed Plan and Plan OK?. The percentage on each card is the agent's
+reported context use, not a guess.</sub></p>
 
-You need **macOS, Linux or WSL2**, **tmux**, **Node.js 20+**, **git**, and **Claude Code
-and/or Codex** installed and signed in.
+## Contents
 
-```sh
-git clone <repo> && cd Attest
-npm ci && npm run build && npm link   # Attest 0.1.0 is not published to npm; build from source
-attest setup                          # installs the case workflow for the harnesses it finds
-```
+[The run, minute by minute](#the-run-minute-by-minute) · [The plan gate](#1-the-plan-gate) ·
+[The build](#2-the-build) · [Claude Code](#3-claude-code-builder) · [Codex](#4-codex-builder) ·
+[Review](#5-review) · [Merge and diff](#6-merge-and-diff) · [Jev audit](#7-the-jev-audit) ·
+[MR gate](#8-the-mr-ok-gate) · [Orchestration](#how-the-orchestration-works) ·
+[Jev design](#the-jev-decision-layer) · [Reproduce](#reproduce-this-run) ·
+[Panel](#the-panel) · [Libraries](#library-choices) · [Limits](#known-limits)
 
-Open Claude Code or Codex **inside tmux, in the repository you want to change**, and ask:
+## The run, minute by minute
 
-```text
-Run this as an attest case: add a header search box that filters the catalog as you
-type, and a dark theme that follows the system setting.
-```
+| Time | What happened | Evidence |
+| --- | --- | --- |
+| 20:09 | The plan was written and checked. `attest gate plan` opened; TypeSafe Jev recorded `plan.risk` and `plan.clarity`. | plan gate frame below; `plan.risk` 0.32 medium, 1,325 ms, 1,462 input tokens |
+| 20:09 | The person approved at the plan gate. `attest stage build`; `attest dispatch search` and `attest dispatch theme`. | two role worktrees and branches, two real tmux panes |
+| 20:09–20:10 | Claude Code implemented `filterItems` and tests (18 s, 5/5 tests, commit `d47fd6b`). Codex implemented `resolveTheme` and tests (23 s, 3/3 tests, commit `c494da5`). | the two session captures below |
+| 20:10 | `attest stage review`; the reviewer read both branches, ran tests in its own worktree, and wrote PASS with `done_when: [1, 2, 3]` (2 min 37 s). | review capture below |
+| 20:10 | The rated branches were merged into `case/live-demo`, one merge commit per role. | DIFF frame below |
+| 20:13 | `attest stage audit` verified the chain, recorded `result.fidelity` for every result, wrote `docs/cases/live-demo/audit.md`, and reached 13 records. | AUDIT frame below |
+| 20:13 | `attest stage mr-ok`; the MR OK gate opened with the audit verdict in the question. **Nothing was pushed or merged by the CLI.** | MR gate frame below |
 
-The agent writes the plan and opens the panel beside it. Read the plan, press **`a`** to
-approve or **`c`** to request changes; roles start only after approval.
+## 1. The plan gate
 
-Prefer a terminal-first start? Run this in the repository you want to change:
+The plan is a Markdown file with one YAML block and one `## Role:` section per
+role. The gate shows exactly what the person is approving: intent, done-when,
+who runs each role, the permission flags and the files each role may touch.
 
-```sh
-attest up -m storefront-search --orch claude
-```
+![The plan gate in the live panel](docs/media/live-plan-gate.png)
 
-It creates the case worktree, starts the orchestrator in it, and opens the panel.
+<p align="center"><sub><b>Plan gate.</b> Three real sessions (Claude ×2, Codex ×1), each
+on <code>deepseek-flash</code>. The role arrows show that <code>search</code> and
+<code>theme</code> start at once and <code>review</code> runs as each lands. The footer
+shows the plan's content hash and that the plan checks cleanly.</sub></p>
 
-## From one case to a merged change
+Approving the plan records a hash of the plan **and every referenced role text**.
+If either changes later, the approval is void and dispatch refuses. The hosted
+Jev call happens before the gate is opened; its answer is a signal in the ledger,
+never the approval itself.
 
-1. **Plan together.** The orchestrator reads the code and writes
-   `docs/cases/<case>/plan.md`: goal, why, done-when, out-of-scope, decisions for you,
-   and the role split with each role's agent, model, permissions and `touches`.
-2. **Approve the plan.** The panel shows the plan gate. Approving takes your decisions'
-   recommendations; a change sends your words back to the orchestrator. Any later edit
-   of the plan or a referenced role text needs approval again.
-3. **Build in parallel.** Independent roles open at once in their own windows and
-   worktrees; dependent roles wait for `done` dependencies. Builders commit on their own
-   branch and write a result file the panel and CLI can read.
-4. **Review each branch.** A reviewer checked against a different model reads the diffs
-   and the done-when criteria, and gives one fix round before the orchestrator rules.
-5. **Audit before the MR.** The audit stage verifies the ledger, records result
-   decisions and writes `docs/cases/<case>/audit.md`. In `shadow` mode nothing is
-   refused; in `enforce` mode a high risk blocks and a medium one asks.
-6. **You gate the handoff.** `mr-ok` is asked before anything is pushed. You merge the
-   MR yourself, confirm the `merged` gate, and only then does `attest teardown` remove
-   the case's windows and temporary worktrees.
+## 2. The build
 
-<p align="center">
-  <img src="docs/media/panel-plan-en.png" width="900" alt="The plan gate in the Attest panel: goal, why, done-when criteria, the role split and the approval buttons">
-  <br>
-  <sub><b>The plan gate</b> — the same frame a person approves: goal, why, done-when, the
-  split with each role's agent and effort, and the decisions that approving accepts.</sub>
-</p>
+`attest dispatch` gives every role a worktree and a branch, writes
+`.attest/brief.md`, and starts a real agent in a tmux pane. Two independent roles
+run at the same time.
 
-## The decisions, and the ledger
+![Roles page with the two real builders done](docs/media/live-roles.png)
 
-Most multi-agent tools stop at "the agent said it is done". Attest adds a second
-question: *should this have happened, and can you prove afterwards what was decided?*
+<p align="center"><sub><b>ROLES page.</b> One card per real session: agent, model,
+permission flags, branch, commits, files, and the result the agent wrote. Both builders
+finished with exactly the files their <code>touches</code> allowed; the reviewer has not
+started yet.</sub></p>
 
-The optional `audit:` block in a plan turns on a Jev/System One decision layer:
+The orchestrator does not merge on a builder's word. It reads
+`.attest/result.md`, checks the changed files against `touches`, and then hands
+the branch to review.
+
+## 3. Claude Code builder
+
+Role `search`, agent `claude`, model `deepseek-flash`, permission
+`--dangerously-skip-permissions` in the isolated demo worktree.
+
+![A real Claude Code session in the search worktree](docs/media/live-claude-builder.png)
+
+<p align="center"><sub><b>Claude Code, really running.</b> It read the brief, created
+<code>src/search.js</code> and <code>test/search.test.js</code>, ran
+<code>npm test</code> (5/5), committed <code>d47fd6b</code>, and wrote the result file
+with <code>status: done</code> — then stopped. The frame is captured from its tmux pane
+with <code>tmux capture-pane -ep</code>.</sub></p>
+
+The result file is machine-readable on purpose:
 
 ```yaml
-audit:
-  mode: shadow          # shadow records only; enforce lets high risk block
-  provider: heuristic   # offline and deterministic by default; typesafe calls the API
-  questions: [plan.risk, plan.clarity, role.boundary, result.fidelity, merge.risk, teardown.safety]
+---
+status: done
+summary: "Added filterItems (case-insensitive name filter, trimmed query, all items on empty query) with tests; all 5 tests pass."
+---
 ```
 
-Every decision is appended to a hash-chained ledger
-(`<git-common-dir>/attest/<case>/audit.jsonl`), and every recorded decision can be
-checked later:
+## 4. Codex builder
+
+Role `theme`, agent `codex`, model `deepseek-flash`, permissions
+`-a never -s workspace-write`. Attest adds the git `--add-dir` grants Codex needs
+to commit without writing the main checkout.
+
+![A real Codex session in the theme worktree](docs/media/live-codex-builder.png)
+
+<p align="center"><sub><b>Codex, really running.</b> It implemented
+<code>resolveTheme</code>, added both branch tests, ran the suite (3/3), committed
+<code>c494da5</code>, and wrote its result. The frame includes the real Codex footer:
+<code>deepseek-flash high</code> and the worktree path.</sub></p>
+
+## 5. Review
+
+`attest stage review` starts the reviewer role with `touches: []`: a reviewer
+changes no code. It reads both role branches and the plan's done-when list.
+
+![The real reviewer session with a PASS verdict](docs/media/live-review.png)
+
+<p align="center"><sub><b>The reviewer's real verdict.</b> It checked both branch
+commits, files against <code>touches</code>, branch tests and the combined merge tree,
+and wrote PASS with evidence. The two review files are in
+<code>.attest/reviews/</code>; the result is <code>status: done</code> with
+<code>done_when: [1, 2, 3]</code>.</sub></p>
+
+Only after that PASS did the orchestrator merge the branches. A FAIL would have
+gone back to the same builder for one fix round — the CLI and the workflow both
+refuse a second review loop.
+
+## 6. Merge and diff
+
+![The DIFF page after both reviewed branches were merged](docs/media/live-diff-merged.png)
+
+<p align="center"><sub><b>DIFF after merge.</b> Real commits and files:
+<code>search</code> +31 lines across <code>src/search.js</code> and
+<code>test/search.test.js</code>; <code>theme</code> +13 across the theme module and its
+test; <code>review</code> changes nothing. The diff is read from the role branches, not
+copied from a transcript.</sub></p>
+
+## 7. The Jev audit
+
+The most important screenshot in this repository: the hosted Jev layer evaluating
+the orchestration itself.
+
+![The AUDIT page with nine real hosted Jev decisions](docs/media/live-audit.png)
+
+<p align="center"><sub><b>AUDIT, backed by the live TypeSafe API.</b> Chain verified,
+13 records, provider <code>typesafe</code>, model <code>jev-1.14.0</code> in every
+decision. The decision list includes plan risk/clarity, role boundaries, all three result
+fidelity checks and merge risk. The selected <code>merge.risk</code> is low (0.20);
+calibration reports Brier 0.19 from two recorded outcomes and says that is not yet
+enough to fit a calibration map.</sub></p>
+
+The decisions in that ledger, printed by `attest audit report`:
+
+| id | band | action | p | what it means |
+| --- | --- | --- | --- | --- |
+| `plan.risk` | medium | shadow | 0.32 | the plan is not obviously dangerous, but not a clean low |
+| `plan.clarity` | medium | shadow | 0.335 | some ambiguity; the reviewer had to interpret the criteria |
+| `role.boundary` ×2 | high | shadow | 0.78 | **a real false positive**: both builders stayed inside `touches`; review and merge evidence clear it |
+| `role.boundary` | medium | shadow | 0.53 | the reviewer role changes no files, but the model still saw boundary risk |
+| `result.fidelity` ×3 | medium | shadow | 0.61 / 0.62 / 0.59 | the results claimed tests and commits; the reviewer verified them |
+| `merge.risk` | low | shadow | 0.20 | reviewed diffs, tests passing, small change |
+
+The high boundary scores are exactly why `shadow` is the default and why the
+README does not claim the model is right. **The Jev answer is a signal; the
+reviewer, the deterministic `touches` check and the person's gate are still the
+authority.** In `enforce` mode those highs would have blocked dispatch; before
+turning that on, a team should record outcomes and inspect calibration.
+
+One decision, in the ledger's own words:
+
+```console
+$ attest audit show 0 -m live-demo
+seq 0 · plan.risk · 2026-11-15T12:09:35.479Z
+band medium · action shadow · provider typesafe/jev-1.14.0 · risk 0.32
+latency 1325 ms · tokens 1462 in / 20 out
+state sha256:07f4cdebaa1858ca38a03e0a34e00c53cc1d4537fe1daf1e8bca3d2546052ae1
+reason policy.ask.medium: risk 0.32 is the medium band (typesafe/jev-1.14.0); enforce mode would ask; shadow records only
+answers risk: noul 0.32
+```
+
+The chain is append-only and hash-chained:
+
+```console
+$ attest audit verify -m live-demo
+OK 13 records
+Verify record 13 appended.
+```
+
+At the MR gate, two human/reviewer outcomes were recorded for calibration:
+
+```console
+$ attest audit outcome result.fidelity pass --note "both branches reviewed and merged after tests passed"
+Recorded outcome for result.fidelity (seq 8): expected shadow, observed pass
+$ attest audit calibrate -m live-demo
+insufficient outcomes: 2 sample(s) for case live-demo; at least 5 verdicts are needed
+before calibration means anything.
+```
+
+### Where Jev is consulted
+
+| Decision | When | State it sees | On a high band in `enforce` |
+| --- | --- | --- | --- |
+| `plan.risk` / `plan.clarity` | plan gate | plan text, goal, done-when, roles, touches | block / ask the plan gate |
+| `role.boundary` | each `dispatch` | brief, touches, dependencies, plan goal | block the dispatch |
+| `result.fidelity` | result wait and audit stage | result claim, commits, changed/outside files, review text | refuse the audit stage |
+| `merge.risk` | `mr-ok` gate | role results, reviews, file and commit counts | refuse the MR OK gate |
+| `teardown.safety` | `teardown` | dirty/untracked files, unmerged/unpushed work | refuse teardown |
+
+Deterministic rules run **before** the model: a force push, a destructive
+command, a secret path, a write outside `touches`, a dirty teardown, or
+`--no-verify` is decided by code and never sent to Jev. Instructions live in the
+question; the state is untrusted, bounded to 32,000 characters, and
+SHA-256-digested into every ledger record.
+
+## 8. The MR OK gate
+
+![The MR OK gate waiting for the person](docs/media/live-mr-gate.png)
+
+<p align="center"><sub><b>MR OK.</b> The question carries the audit verdict: two real
+DeepSeek-flash builders, a real reviewer, a verified Jev chain, and the remaining
+medium/high shadow decisions. The CLI does not push, open an MR, or merge; it waits for
+a person. This demo stops here on purpose.</sub></p>
+
+The remaining stages are the person's: open the MR, merge it, then confirm
+`merged` and run `attest teardown`. Only then are the temporary worktrees and
+panes removed; the case branch, run log and audit ledger are kept.
+
+## How the orchestration works
+
+```text
+person / orchestrator
+        │  plan.md + gate
+        ▼
+  case/live-demo  ── worktree .attest/cases/live-demo
+        │
+        ├── role/live-demo/search  → worktree A → Claude Code (deepseek-flash) ─┐
+        ├── role/live-demo/theme   → worktree B → Codex       (deepseek-flash) ─┤
+        │                                                                    review
+        │                                                                    (touches: [])
+        └── merge each PASS branch onto case/live-demo ── audit stage ── MR OK gate
+```
+
+- **A case is the whole change.** Its plan lives in `docs/cases/<case>/plan.md` in
+  its own worktree; the orchestration state lives outside git
+  (`<git-common-dir>/attest/<case>/`).
+- **A role is a real session.** One tmux window/panel, one worktree, one branch,
+  one result file. `touches` is enforced by review; `depends_on` is enforced by
+  `dispatch`; role permission flags are pinned by the plan and checked by
+  `attest check`.
+- **Gates are the only way forward.** No dispatch without an approved plan; no
+  MR OK before the audit stage; no teardown before the merge confirmation. The
+  CLI prints exit `0`/`1`/`2` and refuses with a reason, never silently.
+- **The panel is the control room.** Six pages: CASE, ROLES, PLAN, LOG, DIFF,
+  AUDIT; English/Chinese; mouse where tmux passes it; `panel --once --plain`
+  for scripts and tests.
+
+## The Jev decision layer
+
+Attest asks a small set of typed questions instead of adding another chat model
+call to the critical path:
+
+- **Noul** — a yes/no probability (`plan.risk`, `role.boundary`, `result.fidelity`,
+  `merge.risk`, `teardown.safety`);
+- **Score** — an ordered level (`plan.clarity`, five criteria from “no ambiguity”
+  to “severe ambiguity”);
+- **Choice** — a named option (available for routing/review triage; not wired by
+  default).
+
+The policy engine, not the model, maps probability to `allow` / `ask` / `block`:
+low `< 0.25`, medium `0.25–0.75`, high `> 0.75`. `shadow` records the would-be
+action and never refuses; `enforce` asks on medium and blocks on high. A missing,
+malformed or failed answer fails safe (band `high`, enforce action `ask`, never
+allow), and a provider error falls back to the offline heuristic with the error
+recorded.
+
+The ledger is append-only JSONL under the git common dir, each record linked by
+SHA-256 to its predecessor. `verify` reports the first broken record; `report`
+refuses to write an audit report from a broken chain; outcomes are separate
+records and feed a Brier score / reliability table once there are enough samples.
+The default provider is the deterministic **heuristic**; the **typesafe**
+provider is opt-in and was used for this live run. The screenshots show the
+provider and model in every decision so the two are never confused.
+
+## Reproduce this run
+
+Prerequisites: Linux/macOS/WSL2, tmux, git, Node 20+, and real Claude Code and
+Codex CLIs configured against DeepSeek. Keys are read from the environment; do
+not put them in the plan or a committed file.
 
 ```sh
-attest audit verify          # OK <n> records, or BROKEN at record <n>
-attest audit report --write  # the case summary; writes docs/cases/<case>/audit.md
-attest audit show 3          # one decision with its reason and state digest
-attest audit outcome result.fidelity pass
-attest audit calibrate       # Brier score and reliability bins, once outcomes exist
+# 1. Claude Code → DeepSeek (Anthropic-compatible endpoint)
+export DEEPSEEK_API_KEY=...
+export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+export ANTHROPIC_AUTH_TOKEN=$DEEPSEEK_API_KEY
+export ANTHROPIC_MODEL=deepseek-flash
+
+# 2. Codex → DeepSeek (Responses API)
+# ~/.codex/config.toml:
+# model = "deepseek-flash"
+# model_provider = "deepseek"
+# [model_providers.deepseek]
+# name = "deepseek"
+# base_url = "https://api.deepseek.com/"
+# wire_api = "responses"
+# env_key = "DEEPSEEK_API_KEY"
+
+# 3. hosted Jev
+export ATTEST_JEV_API_KEY=$TYPESAFE_API_KEY
+
+# 4. Attest itself
+npm ci && npm run build && npm link
+attest setup
+
+# 5. in the target repository
+attest case new live-demo
+# write docs/cases/live-demo/plan.md (see examples/demo for the format) and commit it
+attest check -m live-demo
+attest open -m live-demo
+attest gate plan "Approve this plan?" --no-wait -m live-demo
+# approve in the panel with `a`, then:
+attest stage build -m live-demo
+attest dispatch search -m live-demo
+attest dispatch theme -m live-demo
+attest stage review -m live-demo
+attest dispatch review -m live-demo
+# merge the PASS branches onto case/live-demo, then:
+attest stage audit -m live-demo
+attest audit report --write -m live-demo
+attest stage mr-ok -m live-demo
+attest gate mr-ok "Ship it?" --no-wait -m live-demo
 ```
 
-Three design rules keep this honest. **Deterministic rules win**: a force push, a
-destructive command, a secret path or a write outside `touches` is decided by a regex
-and the model is not consulted. **Answers are signals, never authorization**: gates,
-permissions and review still decide, and a provider error fails safe (ask, never
-allow). **The provider is your choice**: the offline heuristic is the default; the
-HTTP provider is opt-in, bounded and logged.
-
-### See it run, and what the screenshots use
-
-The screenshots and a default install use `provider: heuristic`: a deterministic,
-offline provider behind the same typed-decision contract. It is **not** the hosted
-Jev model, and every decision records `provider: heuristic` so the two cannot be
-confused. An abridged run on the demo case:
-
-```sh
-$ attest gate plan "Approve the search and dark-theme plan" --no-wait -m storefront-search
-Opened gate plan
-$ attest audit verify -m storefront-search
-OK 2 records
-Verify record 2 appended.
-$ attest audit report -m storefront-search
-# Audit: storefront-search
-
-- Chain: OK 3 records
-- Mode: shadow · provider: heuristic
-- Decisions: 2 · allow 0 · ask 0 · block 0 · shadow 2
-- Bands: low 1 · medium 0 · high 1 · unknown 0
-- Risk: high
-- Verdict: 2 decision(s) recorded in shadow mode; nothing was refused
-```
-
-In `enforce` mode a high band stops the gate. With `git push --force origin main`
-written into a role's brief, the deterministic pre-check wins and the ledger says
-so (the ledger was reset between the two excerpts; paths and hashes are trimmed):
-
-```sh
-$ ATTEST_JEV_MODE=enforce attest gate plan "Ship it?" --no-wait -m storefront-search
-plan gate: audit plan.clarity: high 0.93 (heuristic) → block: policy.block.high: …
-# exit 1
-$ attest audit show 0 -m storefront-search
-seq 0 · plan.risk · …
-band high · action block · provider precheck · risk —
-state sha256:…
-reason precheck.force-push: state names a force push; the deterministic rule decides, the model is not consulted
-```
-
-A live hosted run (2026-11-15, key supplied at runtime; this ledger is separate
-from the heuristic excerpts above) records the versioned model, latency and token
-usage:
-
-```sh
-$ ATTEST_JEV_PROVIDER=typesafe ATTEST_JEV_API_KEY=… attest gate plan "Live Jev check" --no-wait -m storefront-search
-Opened gate plan
-$ attest audit show 0 -m storefront-search
-band low · action shadow · provider typesafe/jev-1.14.0 · risk 0.12
-latency 639 ms · tokens 2726 in / 20 out
-$ attest audit show 1 -m storefront-search
-band medium · action shadow · provider typesafe/jev-1.14.0 · risk 0.28
-latency 250 ms · tokens 2762 in / 17 out
-answers risk: score 0.28 (confidence 0.62)
-```
-
-<p align="center">
-  <img src="docs/media/panel-audit-live-en.png" width="900" alt="The live AUDIT page with a hosted Jev decision: provider typesafe, model jev-1.14.0, plan.clarity medium">
-  <br>
-  <sub><b>A live hosted Jev decision</b> — captured from the real panel on 2026-11-15:
-  `provider: typesafe`, `model jev-1.14.0`, `plan.clarity` medium at 0.28. The key was
-  supplied at runtime and never stored; unlike the five reproducible frames above,
-  this capture needs a TypeSafe credential to recreate.</sub>
-</p>
-
-To call the hosted TypeSafe System One endpoint, keep `mode: shadow`, set
-`ATTEST_JEV_PROVIDER=typesafe` and `ATTEST_JEV_API_KEY` (optionally
-`ATTEST_JEV_BASE_URL` and `ATTEST_JEV_MODEL`), record a few
-`attest audit outcome` verdicts, then move to `enforce` once the report's
-calibration is meaningful. The provider has been live-verified against
-`POST /v1/systemone` (`jev-1.14.0`); the sanitized evidence is in
-[docs/dev/jev-live-verification.md](docs/dev/jev-live-verification.md). The
-request/response contract, its caveats and the full command reference are in
-[the Jev audit guide](docs/jev-audit.md).
-
-<p align="center">
-  <img src="docs/media/panel-audit-en.png" width="900" alt="The Attest panel's AUDIT page: chain status, mode and provider, risk verdict, band counts, decision table, reasons and calibration bars">
-  <br>
-  <sub><b>The AUDIT page</b> — chain status, mode and provider, the risk verdict, band
-  counts, every decision with its probability, the selected reason and state digest,
-  and calibration bars once outcomes are recorded.</sub>
-</p>
-
-Read [docs/jev-audit.md](docs/jev-audit.md) for the full design: the typed decision
-protocol, the policy, the trust boundary, what attestation does and does not prove, and
-the published evidence behind the approach — including its calibration and adversarial
-caveats.
+The demo app used here is a 30-line ESM project (`greet`, two feature modules,
+`node --test`); the point is the orchestration and the audit evidence, not the
+size of the code. The screenshot frames are captured with
+`tmux capture-pane -ep` and rendered by `tools/screenshot/render.py`; the
+reproducible offline demo is documented in `tools/screenshot/README.md`.
 
 ## The panel
 
 | Page | What it shows |
 | --- | --- |
-| `1 CASE` | Roles with live state, stages, activity, the flow of the team, and the selected role's detail and live window. An open gate or each role waiting on you appears at the top. |
+| `1 CASE` | Roles with live state, stages, activity, the flow of the team, and the selected role's detail/window. |
 | `2 ROLES` | One card per role: agent, model, effort, permissions, branch, commits, changed files, result summary. |
-| `3 PLAN` | The plan as rendered Markdown with its problems, plus the summary the gate uses. |
-| `4 LOG` | Every event of the run, newest first, openable to its fields. |
+| `3 PLAN` | The plan as rendered Markdown with its problems and the gate summary. |
+| `4 LOG` | Every event, newest first, openable to its fields. |
 | `5 DIFF` | Each role's changed files as a tree, with hunks and a minimap. |
-| `6 AUDIT` | The ledger: chain, mode/provider, risk, band counts, decisions, reasons and calibration. |
+| `6 AUDIT` | Ledger chain, mode/provider, risk, band counts, decisions, reasons, digests, calibration. |
 
-Keys: `1`–`6` or `Tab` switch pages, `↑↓`/`j k` select, `Enter` opens the detail, `o`
-opens a role's window, `s` sends it a message, `d` jumps to its diff, `v` shows the
-plan, `a`/`c` answer a gate, `?` shows help, `q` quits. `中/EN` (or `L`) switches the
-panel between English and Chinese and is remembered in `~/.config/attest/settings.json`;
-role windows and the languages agents write in follow that choice. Clicks work where
-tmux passes the mouse.
-
-<p align="center">
-  <img src="docs/media/panel-roles-en.png" width="900" alt="The ROLES page: one card per role with its state, agent, effort, branch, commits and result summary">
-  <br>
-  <sub><b>The ROLES page</b> — the same run, one card per role. Ctx and tokens appear when
-  the harness reports them; a role with a result is done even if its window is idle.</sub>
-</p>
-
-<p align="center">
-  <img src="docs/media/panel-case-zh.png" width="900" alt="The Attest panel in Chinese: the case page with roles, stages, activity and flow">
-  <br>
-  <sub><b>中文界面</b> — labels, gates and help switch to Simplified Chinese; role names, branches,
-  commands and what attest reads back stay in English.</sub>
-</p>
-
-## Commands
-
-Every command takes `-m, --case <name>`; without it a command acts on the case bound to
-the pane it runs in, else on the case branch checked out there. Exit codes: `0` success,
-`1` refused with the reasons, `2` usage.
-
-| Command | What it does |
-| --- | --- |
-| `attest setup [--remove]` | install or remove the case workflow for each harness found |
-| `attest case new <name> [--base <ref>]` | create the case worktree on `case/<name>` with a plan template, bind this pane, open its panel |
-| `attest open [--planning] [-m case]` | show the case's panel beside this agent |
-| `attest up -m <case> [--orch claude\|codex]` | create the case, start the orchestrator in its worktree, open the panel |
-| `attest check [case\|folder\|plan]` | check a plan and the repository's agent adapters |
-| `attest approve [-m case]` | approve the plan from a terminal (the panel's `a` does the same) |
-| `attest gate <id> ["question"] [--no-wait]` | ask the person in the panel |
-| `attest stage <id>` | move the stage strip (ids from the workflow's `stages.yaml`) |
-| `attest dispatch <role>` | open a role: worktree, branch, brief, window |
-| `attest status [--json] [--watch]` | each role's state, commits, files outside `touches`, result |
-| `attest send <role> <text…>` | type into a role's window when it is ready |
-| `attest wait --role <r> [--ready] \| --gate <id> [--timeout s]` | wait for a result, readiness or a gate answer |
-| `attest close <role> \| --all` | close attest's panes; worktrees and branches stay |
-| `attest panel [--once] [--plain] [--no-anim] [--width N --height N]` | the live panel |
-| `attest audit verify\|report\|show\|outcome\|calibrate` | the audit ledger: check, report, inspect, record outcomes, calibrate |
-| `attest teardown [--force]` | remove case panes, role worktrees and branches after the gates allow it |
-
-## Agents and adapters
-
-Built in: **Claude Code** and **Codex**. An adapter describes how to start the agent,
-pass model and effort, pin its permission, and read its screen; add one as
-`~/.config/attest/agents/<name>.yaml` or `<repo>/.attest/agents/<name>.yaml` (the
-repository's wins). Each role's `flags` must pin its agent's permission — Claude Code
-`--permission-mode acceptEdits`, Codex `-a on-request -s workspace-write` — so a role
-never inherits a permission mode from your shell. Claude Code roles get lifecycle hooks
-(`UserPromptSubmit`, `PermissionRequest`, `PostToolBatch`, `Stop`, `Notification`) and a
-status line for context use; Codex roles are read from their own session log. The
-[user guide](docs/guide.md#agent-adapters) documents the adapter fields and the fallbacks.
+Keys: `1`–`6`/`Tab` switch pages, `↑↓`/`j k` select, `Enter` opens detail,
+`o` opens a role window, `s` sends it a message, `d` jumps to its diff,
+`v` shows the plan, `a`/`c` answer a gate, `?` help, `q` quits. `中/EN` (or `L`)
+switches English/Chinese; `~/.config/attest/settings.json` remembers it.
 
 ## Library choices
 
-Commodity work uses mature libraries, and each one earns its place: `yaml` for plan
-parsing, `zod` for adapter and decision-response validation, `execa` for process
-execution, `picocolors` for terminal colour, `string-width` for display width, and
-`p-retry` for bounded retries of idempotent calls. The parts that are the product stay
-bespoke because their exact output is a contract: the cell canvas, motion and panel
-renderer (its plain-text goldens are tested), the event-log fold and live state reads,
-the hash-chained ledger, and the typed decision protocol. See
-[docs/dev/contracts.md](docs/dev/contracts.md#5-library-policy) and [NOTICE](NOTICE).
+Commodity work uses mature libraries: `yaml` (plan parsing), `zod` (adapters,
+results, Jev responses), `execa` (process execution), `picocolors` (TTY
+colour), `string-width` (display width), `p-retry` (bounded retries). The parts
+that are the product stay bespoke because their exact output is a contract: the
+cell canvas and panel renderer (golden-tested), the event-log fold and live
+reads, the hash-chained ledger, and the typed decision protocol. See
+[the engineering contracts](docs/dev/contracts.md#5-library-policy) and
+[NOTICE](NOTICE).
 
 ## Known limits
 
-- **The ledger is tamper-evident, not tamper-proof.** It is a local append-only chain;
-  someone who can rewrite the whole file can replace it. It is not signed and has no
-  external timestamp.
-- **The heuristic is not Jev.** The default provider is Attest's own deterministic
-  scoring, labelled `provider: heuristic`. Calibration is measured per case from
-  recorded outcomes and is sparse at first; `audit calibrate` says so rather than
-  guessing.
-- **The screenshots are not vendor sessions.** The panel frames are real CLI
-  output, but the agent binaries in them are scripted adapters and the audit
-  decisions come from the offline heuristic. They demonstrate the product surface,
-  not Claude Code, Codex or the hosted Jev model under load.
-- **Decision models can be attacked.** Published work shows prompt injection and
-  adversarial suffixes can manipulate Jev-style decisions. Attest keeps instructions
-  out of the state, prefers deterministic rules, and fails safe — but do not feed
-  secrets or untrusted content to a remote provider.
-- **Screen patterns are a fallback.** A built-in role's turn is decided by the agent's
-  own signal (hooks or session log), not by its screen; the screen only tells a waiting
-  dialog from working, and an unrecognised screen is `unknown` and never typed into.
-- **One machine, one user.** Roles share the case's refs and objects; that allows
-  commits, not isolation between roles. tmux and git worktrees are the boundary, not a
-  sandbox.
-- **A plan needs approval, and approval needs a terminal.** Panel `a` or
-  `attest approve`; nothing is pushed or merged by the CLI.
-
-## Development
-
-```sh
-git clone <repo> && cd Attest
-npm ci
-npm run build && npm link   # puts your Attest build on the PATH
-./check.sh                  # type-check, build, every test, identity scan
-```
-
-`./check.sh` runs `tsc`, the identity scan and the full `node:test` suite, including
-panel goldens and real-tmux integration tests (they skip when tmux is absent). To
-regenerate panel goldens deliberately: `UPDATE_GOLDENS=1 node --test tests/draw.node.mjs`
-and read the diff. Screenshots in `docs/media/` are produced by
-[tools/screenshot](tools/screenshot/README.md): a real `attest panel` process in tmux,
-captured with `tmux capture-pane -ep` and rendered to PNG. Contributions: see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+- **The audit is a signal, not authorization.** The live run produced two high
+  `role.boundary` decisions (0.78) for builders that stayed inside `touches`.
+  That is a false positive in shadow mode; in `enforce` mode it would have
+  blocked dispatch. Keep shadow until outcomes and calibration justify more.
+- **Calibration is sparse.** Two outcomes gave Brier 0.19, but five are needed
+  before the table means anything; twelve before a holdout-validated
+  recalibration map is considered. `attest audit calibrate` says so.
+- **The ledger is tamper-evident, not tamper-proof.** It is a local append-only
+  chain; someone who can rewrite the whole file can replace it. It is not signed
+  and has no external timestamp.
+- **The demo stops at the MR OK gate.** It did not push a branch, open an MR, or
+  merge; those steps need the person and a real remote. The CLI never performs
+  them on its own.
+- **Screenshots are real, with disclosed setup.** The agents, commits, tests,
+  merges and hosted Jev calls are real. The demo app is intentionally tiny and
+  the keys are supplied at runtime; no key appears in this repo or in a
+  screenshot. The older offline/heuristic frames in `docs/media/` are
+  reproducible without vendor accounts; the live frames require the CLIs and
+  keys above.
+- **One machine, one user.** Roles share the case's git refs and objects; that
+  permits commits, not isolation between roles. tmux/worktrees are the boundary,
+  not a sandbox.
 
 ## Read more
 
-- [User guide](docs/guide.md) — plan format, every command and option, panel controls,
-  adapters, where files live, limits.
-- [The Jev audit](docs/jev-audit.md) — typed decisions, policy, ledger, calibration,
-  adversarial caveats, sources.
+- [User guide](docs/guide.md) — plan format, every command, panel controls,
+  adapters, file locations, limits.
+- [The Jev audit](docs/jev-audit.md) — typed decisions, policy, ledger,
+  calibration, adversarial risks, sources.
+- [Live Jev verification](docs/dev/jev-live-verification.md) — sanitized hosted
+  provider evidence and the request/response contract.
+- [The screenshot harness](tools/screenshot/README.md) — how frames are
+  captured and rendered.
 - [Roadmap](ROADMAP.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md) ·
   [Contributing](CONTRIBUTING.md)
 

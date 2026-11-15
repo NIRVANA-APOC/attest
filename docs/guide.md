@@ -427,12 +427,12 @@ and 22, and once with an empty locale to catch locale-dependent output.
   and read the diff before committing.
 - **Identity scan.** `scripts/check-names.mjs` refuses the retired project
   identity anywhere in the repository; `npm run check` runs it.
-- **Screenshots.** `docs/media/*.png` are real `attest panel` frames captured
-  from tmux and rendered with Pillow. The agent sessions in them are scripted
-  demo adapters, and their audit decisions use the offline `heuristic` provider;
-  no vendor agent or hosted Jev API is shown. See
-  [tools/screenshot](../tools/screenshot/README.md) for the pipeline and its
-  requirements.
+- **Screenshots.** The README screenshots are a real run: real Claude Code and
+  Codex sessions on `deepseek-flash`, real commits and reviews, and hosted
+  TypeSafe Jev decisions. They were captured from tmux with
+  `tmux capture-pane -ep` and rendered with Pillow. The reproducible offline
+  harness in [tools/screenshot](../tools/screenshot/README.md) still uses demo
+  adapters and the offline `heuristic` provider, and says so.
 - **Docs contract.** `tests/docs-contract.node.mjs` checks that commands shown
   in the docs exist in `attest --help`, that every local image reference
   exists, and that the two READMEs reference the same screenshots.

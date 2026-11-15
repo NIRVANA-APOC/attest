@@ -1,7 +1,10 @@
 # The screenshot harness
 
-This directory produces the reproducible panel screenshots referenced by
-`README.md` and `README.zh-CN.md`: `docs/media/panel-case-en.png`,
+This directory produces the reproducible offline panel screenshots kept under
+`docs/media/` (`panel-case-en.png`, etc.); the current `README.md` /
+`README.zh-CN.md` instead embed a separate **real run** with real Claude Code
+and Codex sessions and hosted Jev — see `docs/media/live-*.png` and
+`docs/dev/jev-live-verification.md`. The reproducible set: `docs/media/panel-case-en.png`,
 `panel-plan-en.png`, `panel-roles-en.png`, `panel-audit-en.png` and
 `panel-case-zh.png` (120x40 terminal cells, rendered at 2x: 2448x1648 px each).
 A sixth image, `panel-audit-live-en.png`, records a **live hosted Jev** decision

@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>一个 agent 做计划，一支团队并行开工，只交付被人确认过的东西。</b><br>
-  每个角色都有自己的 tmux 窗口和 git worktree，决策由 Jev/System One 决策层参与把关，
+  每个角色都有自己的 tmux 窗口和 git worktree，决策由 Jev 参与把关，
   并留下一份可发现篡改的审计账本。
 </p>
 
@@ -17,318 +17,373 @@
 
 Attest 0.1.0 · MIT · 运行在 tmux 里 · 支持 Claude Code 与 Codex · 不依赖云端服务
 
-## 为什么是 Attest
+## 这份 README 记录的是一次真实运行
 
-- **看得见团队，随时能插手。** 每个角色都是真实的 Claude Code 或 Codex 会话，跑在
-  自己的 tmux 窗口里。一块面板同时显示谁在干活、谁在等你、每个分支改了什么、
-  角色声称了什么；点开任意角色的窗口就能旁观或直接回应。
-- **先对齐，再动工。** 编排者写计划，你在面板里批准。每个角色从案件分支切出
-  自己的 git worktree 与分支；计划里文件范围重叠，必须显式声明先后顺序。
-- **不同 agent，同一道关卡。** Claude Code 与 Codex 可以混用，每个角色的模型、
-  强度、权限独立设置。默认流程里有审查者逐分支检查，开 MR 前和清理前都会停下来
-  等你确认。
-- **决策可以事后审。** 可选的 Jev/System One 决策层会评估计划风险、角色边界、结果
-  保真度、合并风险与清理安全性；每条决策写入哈希链账本，`attest audit verify`
-  校验链，`attest audit report` 写出 MR 关卡所依据的证据。信号始终只是信号：
-  账本不能授权合并。
+下面的截图和数字来自 **2026-11-15** 的一次真实会话，不是 mockup。两个真实
+编码 agent 并行做出两个分支，第三个真实 agent 完成审查，由托管的 TypeSafe
+Jev 模型做出审计决策，每一帧都是从运行中的 tmux pane 捕获的。
 
-<p align="center">
-  <img src="docs/media/panel-case-zh.png" width="900" alt="Attest 的任务页：角色实时状态、阶段、动态、团队流程与所选角色的详情">
-  <br>
-  <sub><b>任务页</b>——两个构建者已完成，审查者正在等你，前面是审计阶段。
-  截取自真实面板进程；生成方式见 <a href="tools/screenshot/">tools/screenshot</a>。</sub>
-</p>
+| | |
+| --- | --- |
+| **构建者** | **Claude Code 2.1.325**（角色 `search`）与 **Codex CLI 0.169.0**（角色 `theme`） |
+| **模型** | 所有角色统一使用 **`deepseek-flash`**，分别经 DeepSeek 的 Anthropic 兼容端点与 Responses API |
+| **审查者** | **Claude Code 2.1.325**，`deepseek-flash` |
+| **Jev** | 托管 **TypeSafe System One**，`POST /v1/systemone`，模型 **`jev-1.14.0`**，提供方 `typesafe` |
+| **审计模式** | `shadow`——记录每条决策，但不拦截任何动作 |
+| **结果** | 两个真实提交、一次 PASS 审查、两次合并、**13 条账本记录**、**9 条 Jev 决策**、**2 条校准结论**，MR OK 关卡停在等人确认 |
+| **环境** | Node 26.13、tmux 3.8、Linux；API key 只存在于环境变量 |
 
-> **截图里哪些是真的。** 面板、CLI、git worktree、提交、运行日志与审计账本都是
-> Attest 的真实输出；图中的 agent 会话是脚本替身（`tools/screenshot/demo/agent.mjs`），
-> 这样无需登录 Claude Code 或 Codex 也能复现截图；角色与模型标签来自演示计划的
-> adapter 字段。审计相关截图使用的是默认离线 `heuristic` 提供方，不是托管的 Jev API。
+![真实运行中的 Attest 面板：两个真实 agent 正在并行工作](docs/media/live-build-working.png)
 
-## 快速开始
+<p align="center"><sub><b>真实构建中的面板。</b>两张角色卡都是真实会话：Claude Code 跑
+<code>deepseek-flash</code>（search），Codex 跑 <code>deepseek-flash</code>（theme）。
+流程图上两个角色同时处于 working，阶段条已经越过 Plan 和 Plan OK?。卡片上的百分比是
+agent 自己上报的上下文占用，不是估算。</sub></p>
 
-需要 **macOS、Linux 或 WSL2**、**tmux**、**Node.js 20+**、**git**，以及已安装并登录的
-**Claude Code 和/或 Codex**。
+## 目录
 
-```sh
-git clone <repo> && cd Attest
-npm ci && npm run build && npm link   # Attest 0.1.0 尚未发布到 npm，从源码构建
-attest setup                          # 为检测到的 harness 安装案件工作流
-```
+[逐分钟运行记录](#逐分钟运行记录) · [计划关卡](#1-计划关卡) · [构建](#2-构建) ·
+[Claude Code](#3-claude-code-构建者) · [Codex](#4-codex-构建者) · [审查](#5-审查) ·
+[合并与改动](#6-合并与改动) · [Jev 审计](#7-jev-审计) · [MR 关卡](#8-mr-ok-关卡) ·
+[编排机制](#编排是怎么工作的) · [Jev 设计](#jev-决策层) · [复现](#复现这次运行) ·
+[面板](#面板) · [依赖选择](#依赖选择) · [已知限制](#已知限制)
 
-在**要修改的仓库里、tmux 中**打开 Claude Code 或 Codex，然后说：
+## 逐分钟运行记录
 
-```text
-把这件事作为 attest 案件来做：给页头加一个搜索框，输入时即时过滤商品列表，
-再加一套跟随系统设置的深色主题。
-```
+| 时间 | 发生了什么 | 证据 |
+| --- | --- | --- |
+| 20:09 | 计划写好并通过检查；`attest gate plan` 打开，TypeSafe Jev 记录 `plan.risk` 与 `plan.clarity`。 | 下方计划关卡截图；`plan.risk` 0.32 medium，1,325 ms，1,462 输入 token |
+| 20:09 | 人在计划关卡批准；`attest stage build`，`attest dispatch search` 与 `attest dispatch theme`。 | 两个角色 worktree、分支和两个真实 tmux pane |
+| 20:09–20:10 | Claude Code 实现 `filterItems` 和测试（18 秒，5/5，提交 `d47fd6b`）。Codex 实现 `resolveTheme` 和测试（23 秒，3/3，提交 `c494da5`）。 | 下方两个真实会话截图 |
+| 20:10 | `attest stage review`；审查者读两个分支、在自己的 worktree 跑测试，写出 PASS 与 `done_when: [1, 2, 3]`（2 分 37 秒）。 | 下方审查截图 |
+| 20:10 | 通过审查的分支合并进 `case/live-demo`，每个角色一个 merge commit。 | 下方 DIFF 截图 |
+| 20:13 | `attest stage audit` 校验链、为每个结果记录 `result.fidelity`、写出 `docs/cases/live-demo/audit.md`，账本达到 13 条记录。 | 下方 AUDIT 截图 |
+| 20:13 | `attest stage mr-ok`；MR OK 关卡打开，问题里带着审计结论。**CLI 没有推送、开 MR 或合并。** | 下方 MR 关卡截图 |
 
-agent 会写好计划，并在旁边打开面板。看计划，按 **`a`** 批准或按 **`c`** 提出修改；
-批准之后角色才会启动。
+## 1. 计划关卡
 
-更偏终端的方式，也可以直接在要修改的仓库里跑：
+计划是一个 Markdown 文件：一个 YAML 块，加上每个角色一个 `## Role:` 小节。
+关卡展示的正是人要批准的东西：意图、完成标准、每个角色由谁运行、权限参数、
+允许修改的文件。
 
-```sh
-attest up -m storefront-search --orch claude
-```
+![真实面板里的计划关卡](docs/media/live-plan-gate.png)
 
-它会创建案件 worktree、在其中启动编排者并打开面板。
+<p align="center"><sub><b>计划关卡。</b>三个真实会话（Claude ×2、Codex ×1），全部使用
+<code>deepseek-flash</code>。角色箭头表示 <code>search</code> 与 <code>theme</code>
+立即并行，<code>review</code> 随分支落地逐个审查。底部显示计划内容哈希，并标明检查通过。</sub></p>
 
-## 从一个案件到一次合并
+批准会记录计划**以及所有被引用角色文本**的哈希。之后任何改动都会让批准失效，
+dispatch 会拒绝执行。托管 Jev 的调用发生在关卡打开之前；它的答案只是账本里的
+信号，从来不是批准本身。
 
-1. **一起做计划。** 编排者读代码，写出 `docs/cases/<case>/plan.md`：目标、原因、
-   完成标准、不做的事、留给你的决策，以及角色划分（每个角色的 agent、模型、
-   权限与 `touches`）。
-2. **批准计划。** 面板上出现计划关卡。批准即采纳你那些决策的推荐项；选"修改"则把
-   你的话发回编排者。之后任何计划或引用角色文本的改动，都需要重新批准。
-3. **并行构建。** 相互独立的角色同时开窗、各自在自己的 worktree 里工作；有依赖的
-   角色等前置角色 `done`。构建者在自己的分支上提交，并写一份结果文件供面板与
-   CLI 读取。
-4. **逐分支审查。** 审查者通常换一个模型，读 diff 和完成标准，给一轮修复机会，
-   然后由编排者裁定。
-5. **MR 之前先审计。** 审计阶段校验账本、记录结果相关的决策，并写出
-   `docs/cases/<case>/audit.md`。`shadow` 模式只记录、不拒绝；`enforce` 模式下
-   高风险会拦截、中风险会询问。
-6. **由你把关交付。** 推送前先问 `mr-ok`。MR 由你本人合并，确认 `merged` 关卡后，
-   `attest teardown` 才会移除案件的窗口与临时 worktree。
+## 2. 构建
 
-<p align="center">
-  <img src="docs/media/panel-plan-en.png" width="900" alt="Attest 面板里的计划关卡：目标、原因、完成标准、角色划分与批准按钮">
-  <br>
-  <sub><b>计划关卡</b>——人批准时看到的就是这一帧：目标、原因、完成标准、每个角色的
-  agent 与强度，以及批准即采纳的那些待定决策。</sub>
-</p>
+`attest dispatch` 为每个角色创建工作树与分支，写入 `.attest/brief.md`，再在
+tmux pane 里启动真实 agent。相互独立的角色同时运行。
 
-## 决策与账本
+![两个真实构建者完成后的角色页](docs/media/live-roles.png)
 
-多数多 agent 工具停在"agent 说它做完了"。Attest 多问一句：*这件事该发生吗？
-事后能证明当时决定了什么吗？*
+<p align="center"><sub><b>ROLES 页。</b>每个真实会话一张卡片：agent、模型、权限参数、
+分支、提交数、改动文件，以及 agent 自己写的结果。两个构建者都只改了各自
+<code>touches</code> 允许的文件；审查者此时尚未启动。</sub></p>
 
-计划里可选的 `audit:` 配置块会启用 Jev/System One 决策层：
+编排者不会因为 agent 说"做完了"就合并。它读取 `.attest/result.md`，把改动文件与
+`touches` 对照，然后才把分支交给审查。
+
+## 3. Claude Code 构建者
+
+角色 `search`，agent `claude`，模型 `deepseek-flash`，在隔离的演示 worktree 中
+使用 `--dangerously-skip-permissions`。
+
+![search worktree 里真实的 Claude Code 会话](docs/media/live-claude-builder.png)
+
+<p align="center"><sub><b>真实运行的 Claude Code。</b>它读了 brief，创建
+<code>src/search.js</code> 与 <code>test/search.test.js</code>，运行
+<code>npm test</code>（5/5），提交 <code>d47fd6b</code>，写出
+<code>status: done</code> 的结果文件，然后停止。截图来自它的 tmux pane，
+用 <code>tmux capture-pane -ep</code> 捕获。</sub></p>
+
+结果文件刻意设计成机器可读：
 
 ```yaml
-audit:
-  mode: shadow          # shadow 只记录；enforce 才允许高风险拦截
-  provider: heuristic   # 默认离线、确定；typesafe 才访问 API
-  questions: [plan.risk, plan.clarity, role.boundary, result.fidelity, merge.risk, teardown.safety]
+---
+status: done
+summary: "Added filterItems (case-insensitive name filter, trimmed query, all items on empty query) with tests; all 5 tests pass."
+---
 ```
 
-每条决策都追加进哈希链账本（`<git-common-dir>/attest/<case>/audit.jsonl`），事后
-可以逐条核对：
+## 4. Codex 构建者
+
+角色 `theme`，agent `codex`，模型 `deepseek-flash`，权限
+`-a never -s workspace-write`。Attest 会补上 Codex 提交所需的 git `--add-dir`
+授权，同时不允许写主 checkout。
+
+![theme worktree 里真实的 Codex 会话](docs/media/live-codex-builder.png)
+
+<p align="center"><sub><b>真实运行的 Codex。</b>它实现 <code>resolveTheme</code>，补上
+明暗两种分支的测试，运行测试（3/3），提交 <code>c494da5</code>，并写出结果。截图里
+能看到真实的 Codex 底栏：<code>deepseek-flash high</code> 与 worktree 路径。</sub></p>
+
+## 5. 审查
+
+`attest stage review` 启动审查角色，它的 `touches: []`：审查者不改任何代码。它读
+两个角色分支，并对照计划里的完成标准。
+
+![真实审查会话与 PASS 结论](docs/media/live-review.png)
+
+<p align="center"><sub><b>审查者的真实结论。</b>它核对两个分支的提交、文件是否都在
+<code>touches</code> 内、分支测试以及合并后的测试树，写出带证据的 PASS。两个审查文件在
+<code>.attest/reviews/</code>；结果是 <code>status: done</code> 且
+<code>done_when: [1, 2, 3]</code>。</sub></p>
+
+只有 PASS 之后，编排者才合并分支。FAIL 会回到同一个构建者做一轮修复——CLI 和
+workflow 都拒绝第二轮审查。
+
+## 6. 合并与改动
+
+![两个审查通过的分支合并后的 DIFF 页](docs/media/live-diff-merged.png)
+
+<p align="center"><sub><b>合并后的 DIFF。</b>真实提交与文件：<code>search</code> 增加
+31 行（<code>src/search.js</code> 与 <code>test/search.test.js</code>）；
+<code>theme</code> 增加 13 行；<code>review</code> 不改文件。diff 从角色分支实时读取，
+不是从对话里抄来的。</sub></p>
+
+## 7. Jev 审计
+
+这是本仓库最重要的一张截图：托管 Jev 层在评估编排本身。
+
+![含九条真实托管 Jev 决策的 AUDIT 页](docs/media/live-audit.png)
+
+<p align="center"><sub><b>由真实 TypeSafe API 支撑的 AUDIT 页。</b>链已验证、13 条记录、
+提供方 <code>typesafe</code>，每条决策里都有模型 <code>jev-1.14.0</code>。决策列表包含
+计划风险/清晰度、角色边界、三个结果保真度和合并风险。选中的
+<code>merge.risk</code> 为 low（0.20）；校准显示两条结论得到 Brier 0.19，并明确说明
+样本还不足以拟合校准表。</sub></p>
+
+`attest audit report` 打印出的决策如下：
+
+| id | 分级 | 动作 | p | 含义 |
+| --- | --- | --- | --- | --- |
+| `plan.risk` | medium | shadow | 0.32 | 计划不是明显危险，但也不是干净的低风险 |
+| `plan.clarity` | medium | shadow | 0.335 | 存在一些模糊；审查者需要解释完成标准 |
+| `role.boundary` ×2 | high | shadow | 0.78 | **真实假阳性**：两个构建者都严格在 `touches` 内；审查与合并证据推翻了它 |
+| `role.boundary` | medium | shadow | 0.53 | 审查角色不改文件，模型仍看到了边界风险 |
+| `result.fidelity` ×3 | medium | shadow | 0.61 / 0.62 / 0.59 | 结果声称了测试与提交；审查者核实了 |
+| `merge.risk` | low | shadow | 0.20 | 已审查 diff、测试通过、改动很小 |
+
+两个高 `role.boundary` 分数正是 `shadow` 必须作为默认值的原因，也是 README
+不宣称"模型永远正确"的原因。**Jev 答案只是信号；审查者、确定性的 `touches`
+检查和人的关卡仍然是权威。** 在 `enforce` 模式下，这些 high 会阻断 dispatch；
+团队在打开 enforce 之前应该先记录 outcomes、检查校准。
+
+账本里的原始决策：
+
+```console
+$ attest audit show 0 -m live-demo
+seq 0 · plan.risk · 2026-11-15T12:09:35.479Z
+band medium · action shadow · provider typesafe/jev-1.14.0 · risk 0.32
+latency 1325 ms · tokens 1462 in / 20 out
+state sha256:07f4cdebaa1858ca38a03e0a34e00c53cc1d4537fe1daf1e8bca3d2546052ae1
+reason policy.ask.medium: risk 0.32 is the medium band (typesafe/jev-1.14.0); enforce mode would ask; shadow records only
+answers risk: noul 0.32
+```
+
+账本只追加、哈希成链：
+
+```console
+$ attest audit verify -m live-demo
+OK 13 records
+Verify record 13 appended.
+```
+
+在 MR 关卡之前记录了两条校准结论：
+
+```console
+$ attest audit outcome result.fidelity pass --note "both branches reviewed and merged after tests passed"
+Recorded outcome for result.fidelity (seq 8): expected shadow, observed pass
+$ attest audit calibrate -m live-demo
+insufficient outcomes: 2 sample(s) for case live-demo; at least 5 verdicts are needed
+before calibration means anything.
+```
+
+### Jev 在哪些节点参与
+
+| 决策 | 触发点 | 看到的状态 | `enforce` 下 high 的后果 |
+| --- | --- | --- | --- |
+| `plan.risk` / `plan.clarity` | 计划关卡 | 计划文本、目标、完成标准、角色、touches | 阻断或询问计划关卡 |
+| `role.boundary` | 每次 `dispatch` | brief、touches、依赖、计划目标 | 阻断 dispatch |
+| `result.fidelity` | 等待结果与审计阶段 | 结果声明、提交、越界文件、审查文本 | 拒绝审计阶段 |
+| `merge.risk` | `mr-ok` 关卡 | 角色结果、审查、文件与提交计数 | 拒绝 MR OK 关卡 |
+| `teardown.safety` | `teardown` | 脏文件、未提交/未推送工作 | 拒绝清理 |
+
+确定性规则在模型**之前**运行：force push、破坏性命令、机密路径、越出 `touches`
+的写、脏的清理、`--no-verify` 都由代码判定，绝不发给 Jev。指令只放在问题里；
+状态是不可信数据，限制在 32,000 字符内，并以 SHA-256 摘要进入每条账本记录。
+
+## 8. MR OK 关卡
+
+![等待人确认的 MR OK 关卡](docs/media/live-mr-gate.png)
+
+<p align="center"><sub><b>MR OK。</b>问题里带着审计结论：两个真实 DeepSeek-flash
+构建者、一个真实审查者、已验证的 Jev 链，以及剩余的 medium/high shadow 决策。
+CLI 不会推送、开 MR 或合并；它停下来等一个人。这个演示也刻意停在这里。</sub></p>
+
+剩下的阶段属于人：开 MR、合并、确认 `merged`，再运行 `attest teardown`。只有
+那时才清理临时 worktree 与 pane；案件分支、运行日志与审计账本会保留。
+
+## 编排是怎么工作的
+
+```text
+人 / 编排者
+        │  计划 + 关卡
+        ▼
+  case/live-demo  ── worktree .attest/cases/live-demo
+        │
+        ├── role/live-demo/search  → worktree A → Claude Code (deepseek-flash) ─┐
+        ├── role/live-demo/theme   → worktree B → Codex       (deepseek-flash) ─┤
+        │                                                                    review
+        │                                                                    (touches: [])
+        └── 每个 PASS 分支合入 case/live-demo ── 审计阶段 ── MR OK 关卡
+```
+
+- **一个案件就是整次改动。** 计划在它自己的 worktree 的
+  `docs/cases/<case>/plan.md`；编排状态在 git 之外
+  （`<git-common-dir>/attest/<case>/`）。
+- **一个角色就是一个真实会话。** 一个 tmux 窗口/面板、一个 worktree、一个分支、
+  一个结果文件。`touches` 由审查检查，`depends_on` 由 `dispatch` 执行，角色权限
+  参数写进计划并由 `attest check` 校验。
+- **关卡是唯一的前进方式。** 计划未批准不派发；审计阶段未完成不能开 MR OK；
+  未确认合并不能清理。CLI 以退出码 `0`/`1`/`2` 返回并给出拒绝理由，不会静默继续。
+- **面板是控制室。** 六页：CASE、ROLES、PLAN、LOG、DIFF、AUDIT；中英双语；
+  tmux 允许时支持鼠标；脚本和测试可用 `panel --once --plain`。
+
+## Jev 决策层
+
+Attest 在关键路径上问一小组带类型的问题，而不是再加一次聊天模型调用：
+
+- **Noul**——是/否概率（`plan.risk`、`role.boundary`、`result.fidelity`、
+  `merge.risk`、`teardown.safety`）；
+- **Score**——有序档位（`plan.clarity`，五个标准，从"没有歧义"到"严重歧义"）；
+- **Choice**——命名选项（可用于路由/审查分流；默认未接入）。
+
+策略引擎（不是模型）把概率映射成 `allow` / `ask` / `block`：low `< 0.25`，
+medium `0.25–0.75`，high `> 0.75`。`shadow` 只记录本来会执行的动作，从不拒绝；
+`enforce` 在 medium 询问、high 阻断。答案缺失、格式错误或请求失败都会 fail-safe
+（band `high`，enforce 动作 `ask`，绝不放行），提供方出错则回退到离线启发式并记录
+错误。
+
+账本在 git common dir 下的只追加 JSONL，每条记录用 SHA-256 链接到前一条。
+`verify` 报告第一条断裂记录；`report` 拒绝从断裂的链写出报告；outcomes 是独立
+记录，样本足够后进入 Brier 分数与可靠性表。默认提供方是确定性的 **heuristic**；
+**typesafe** 是可选增强，本次真实运行使用的就是它。截图里每条决策都显示提供方与
+模型，两者不会被混淆。
+
+## 复现这次运行
+
+前置条件：Linux/macOS/WSL2、tmux、git、Node 20+，以及配置到 DeepSeek 的真实
+Claude Code 与 Codex CLI。key 只从环境变量读取；不要写进计划或提交文件。
 
 ```sh
-attest audit verify          # OK <n> records，或 BROKEN at record <n>
-attest audit report --write  # 案件摘要；写出 docs/cases/<case>/audit.md
-attest audit show 3          # 单条决策的原因与状态摘要
-attest audit outcome result.fidelity pass
-attest audit calibrate       # 有结果样本后给出 Brier 分数与可靠性分箱
+# 1. Claude Code → DeepSeek（Anthropic 兼容端点）
+export DEEPSEEK_API_KEY=...
+export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+export ANTHROPIC_AUTH_TOKEN=$DEEPSEEK_API_KEY
+export ANTHROPIC_MODEL=deepseek-flash
+
+# 2. Codex → DeepSeek（Responses API）
+# ~/.codex/config.toml:
+# model = "deepseek-flash"
+# model_provider = "deepseek"
+# [model_providers.deepseek]
+# name = "deepseek"
+# base_url = "https://api.deepseek.com/"
+# wire_api = "responses"
+# env_key = "DEEPSEEK_API_KEY"
+
+# 3. 托管 Jev
+export ATTEST_JEV_API_KEY=$TYPESAFE_API_KEY
+
+# 4. Attest 本体
+npm ci && npm run build && npm link
+attest setup
+
+# 5. 在目标仓库里
+attest case new live-demo
+# 写入 docs/cases/live-demo/plan.md（格式见 examples/demo），然后提交
+attest check -m live-demo
+attest open -m live-demo
+attest gate plan "Approve this plan?" --no-wait -m live-demo
+# 在面板里按 `a` 批准，然后：
+attest stage build -m live-demo
+attest dispatch search -m live-demo
+attest dispatch theme -m live-demo
+attest stage review -m live-demo
+attest dispatch review -m live-demo
+# 把 PASS 分支合入 case/live-demo，然后：
+attest stage audit -m live-demo
+attest audit report --write -m live-demo
+attest stage mr-ok -m live-demo
+attest gate mr-ok "Ship it?" --no-wait -m live-demo
 ```
 
-三条设计原则让这件事保持诚实。**确定性规则优先**：force push、破坏性命令、
-机密路径、越出 `touches` 的写，直接由正则判定，根本不询问模型。**答案只是信号，
-从不授权**：关卡、权限与审查仍然决定一切；提供方出错时 fail-safe（询问，绝不放
-行）。**提供方由你选择**：默认是离线启发式；HTTP 提供方需要显式开启，且有大小、
-超时与日志边界。
-
-### 看它跑起来，以及审计截图用的是什么
-
-截图与默认安装使用的是 `provider: heuristic`：它是同一套带类型决策契约背后的
-确定性离线提供方，**不是**托管的 Jev 模型；每条决策都记录 `provider: heuristic`，
-两者不会被混淆。下面是一段来自演示案件的删节运行记录：
-
-```sh
-$ attest gate plan "Approve the search and dark-theme plan" --no-wait -m storefront-search
-Opened gate plan
-$ attest audit verify -m storefront-search
-OK 2 records
-Verify record 2 appended.
-$ attest audit report -m storefront-search
-# Audit: storefront-search
-
-- Chain: OK 3 records
-- Mode: shadow · provider: heuristic
-- Decisions: 2 · allow 0 · ask 0 · block 0 · shadow 2
-- Bands: low 1 · medium 0 · high 1 · unknown 0
-- Risk: high
-- Verdict: 2 decision(s) recorded in shadow mode; nothing was refused
-```
-
-`enforce` 模式下 high 分会直接拦住关卡。把 `git push --force origin main` 写进角色
-说明后，确定性预检会胜出，账本如实记录（两段输出之间重置过账本；路径与哈希有删节）：
-
-```sh
-$ ATTEST_JEV_MODE=enforce attest gate plan "Ship it?" --no-wait -m storefront-search
-plan gate: audit plan.clarity: high 0.93 (heuristic) → block: policy.block.high: …
-# exit 1
-$ attest audit show 0 -m storefront-search
-seq 0 · plan.risk · …
-band high · action block · provider precheck · risk —
-state sha256:…
-reason precheck.force-push: state names a force push; the deterministic rule decides, the model is not consulted
-```
-
-一次真实托管运行（2026-11-15，key 只在运行时提供；账本与上面的启发式示例分开）
-会记录版本化模型、耗时与 token 用量：
-
-```sh
-$ ATTEST_JEV_PROVIDER=typesafe ATTEST_JEV_API_KEY=… attest gate plan "Live Jev check" --no-wait -m storefront-search
-Opened gate plan
-$ attest audit show 0 -m storefront-search
-band low · action shadow · provider typesafe/jev-1.14.0 · risk 0.12
-latency 639 ms · tokens 2726 in / 20 out
-$ attest audit show 1 -m storefront-search
-band medium · action shadow · provider typesafe/jev-1.14.0 · risk 0.28
-latency 250 ms · tokens 2762 in / 17 out
-answers risk: score 0.28 (confidence 0.62)
-```
-
-<p align="center">
-  <img src="docs/media/panel-audit-live-en.png" width="900" alt="真实托管 Jev 决策的审计页：provider typesafe、模型 jev-1.14.0、plan.clarity medium">
-  <br>
-  <sub><b>一次真实托管 Jev 决策</b>——2026-11-15 从真实面板截取：
-  `provider: typesafe`、`model jev-1.14.0`、`plan.clarity` medium 0.28。key 只在运行时
-  提供、从不落盘；与上面五张可复现截图不同，重拍这一张需要 TypeSafe 凭据。</sub>
-</p>
-
-要调用托管的 TypeSafe System One 端点：保持 `mode: shadow`，设置
-`ATTEST_JEV_PROVIDER=typesafe` 与 `ATTEST_JEV_API_KEY`（可选
-`ATTEST_JEV_BASE_URL`、`ATTEST_JEV_MODEL`），先用 `attest audit outcome` 记录几份
-人工结论，等报告里的校准有意义后再切到 `enforce`。该提供方已对
-`POST /v1/systemone`（`jev-1.14.0`）做过真实联调，脱敏证据见
-[docs/dev/jev-live-verification.md](docs/dev/jev-live-verification.md)。请求/响应
-契约、限制与完整命令参考见 [Jev 审计指南](docs/jev-audit.zh-CN.md)。
-
-<p align="center">
-  <img src="docs/media/panel-audit-en.png" width="900" alt="Attest 面板的审计页：链状态、模式与提供方、风险结论、分级计数、决策表、原因与校准条">
-  <br>
-  <sub><b>审计页</b>——链状态、模式与提供方、风险结论、分级计数、每条决策及其概率、
-  所选决策的原因与状态摘要；记录结果之后还会显示校准条。</sub>
-</p>
-
-完整设计见 [docs/jev-audit.zh-CN.md](docs/jev-audit.zh-CN.md)：带类型的决策协议、
-策略、信任边界、账本能证明与不能证明什么，以及公开证据——包括校准与对抗攻击方面
-必须说明的保留意见。
+这里用的演示应用是一个 30 行的 ESM 项目（`greet`、两个功能模块、`node --test`）；
+重点是编排与审计证据，不是代码规模。截图帧来自 `tmux capture-pane -ep`，并由
+`tools/screenshot/render.py` 渲染；可离线复现的演示见
+`tools/screenshot/README.md`。
 
 ## 面板
 
 | 页面 | 内容 |
 | --- | --- |
-| `1 CASE` 任务 | 角色实时状态、阶段、动态、团队流程，以及所选角色的详情与实时窗口。打开的关卡、每个等你的角色都排在顶部。 |
-| `2 ROLES` 角色 | 每个角色一张卡片：agent、模型、强度、权限、分支、提交、改动文件、结果摘要。 |
-| `3 PLAN` 计划 | 渲染后的计划与它的问题，加上关卡所用的摘要。 |
-| `4 LOG` 日志 | 本次运行的全部事件，最新在前，可展开字段。 |
-| `5 DIFF` 改动 | 每个角色的改动文件树，含 hunk 与缩略图。 |
-| `6 AUDIT` 审计 | 账本：链、模式/提供方、风险、分级计数、决策、原因与校准。 |
+| `1 CASE` | 角色实时状态、阶段、动态、团队流程，以及所选角色的详情/窗口。 |
+| `2 ROLES` | 每个角色一张卡片：agent、模型、强度、权限、分支、提交、改动文件、结果摘要。 |
+| `3 PLAN` | 渲染后的计划与它的问题，以及关卡所用的摘要。 |
+| `4 LOG` | 全部事件，最新在前，可展开字段。 |
+| `5 DIFF` | 每个角色的改动文件树，含 hunk 与小地图。 |
+| `6 AUDIT` | 链状态、模式/提供方、风险、分级计数、决策、原因、摘要、校准。 |
 
-按键：`1`–`6` 或 `Tab` 切页，`↑↓`/`j k` 选择，`Enter` 展开详情，`o` 打开角色窗口，
-`s` 给它发消息，`d` 跳到它的 diff，`v` 看计划，`a`/`c` 回应关卡，`?` 帮助，
-`q` 退出。`中/EN`（或 `L`）切换面板语言，选择保存在
-`~/.config/attest/settings.json`；角色窗口与 agent 的书写语言都跟随它。tmux 传递
-鼠标事件时，点击也有效。
-
-<p align="center">
-  <img src="docs/media/panel-roles-en.png" width="900" alt="角色页：每个角色一张卡片，含状态、agent、强度、分支、提交与结果摘要">
-  <br>
-  <sub><b>角色页</b>——同一次运行，一角色一卡片。harness 报告 ctx 与 token 时才显示；
-  已写结果的角色即使窗口空闲也算完成。</sub>
-</p>
-
-<p align="center">
-  <img src="docs/media/panel-case-en.png" width="900" alt="Attest 面板英文界面：任务页的角色、阶段、动态与流程">
-  <br>
-  <sub><b>English UI</b>——同一个面板的英文界面。界面语言只影响人读的文本；角色名、
-  分支、命令，以及 attest 要读回来的内容（标题、YAML、`status:`）保持英文。</sub>
-</p>
-
-## 命令
-
-所有命令都接受 `-m, --case <name>`；不带时作用于当前 pane 绑定的案件，否则作用于
-当前检出的 `case/<name>` 分支。退出码：`0` 成功，`1` 被拒绝（附原因），`2` 用法错误。
-
-| 命令 | 作用 |
-| --- | --- |
-| `attest setup [--remove]` | 为检测到的 harness 安装或移除案件工作流 |
-| `attest case new <name> [--base <ref>]` | 创建 `case/<name>` 的 worktree 与计划模板，绑定当前 pane，打开面板 |
-| `attest open [--planning] [-m case]` | 在 agent 旁边打开案件面板 |
-| `attest up -m <case> [--orch claude\|codex]` | 创建案件，在 worktree 里启动编排者，打开面板 |
-| `attest check [case\|folder\|plan]` | 检查计划与仓库里的 agent 适配器 |
-| `attest approve [-m case]` | 在终端里批准计划（面板里按 `a` 等价） |
-| `attest gate <id> ["question"] [--no-wait]` | 在面板里向人提问 |
-| `attest stage <id>` | 移动阶段条（id 见工作流的 `stages.yaml`） |
-| `attest dispatch <role>` | 打开一个角色：worktree、分支、brief、窗口 |
-| `attest status [--json] [--watch]` | 每个角色的状态、提交、超出 `touches` 的文件、结果 |
-| `attest send <role> <text…>` | 角色就绪时向它的窗口输入 |
-| `attest wait --role <r> [--ready] \| --gate <id> [--timeout s]` | 等待结果、就绪或关卡回答 |
-| `attest close <role> \| --all` | 关闭 attest 打开的 pane；worktree 与分支保留 |
-| `attest panel [--once] [--plain] [--no-anim] [--width N --height N]` | 实时面板 |
-| `attest audit verify\|report\|show\|outcome\|calibrate` | 审计账本：校验、报告、查看、记录结果、校准 |
-| `attest teardown [--force]` | 关卡允许后移除案件 pane、角色 worktree 与分支 |
-
-## Agent 与适配器
-
-内置 **Claude Code** 与 **Codex**。适配器描述如何启动 agent、如何传模型与强度、
-如何固定权限、如何读屏；放在 `~/.config/attest/agents/<name>.yaml` 或
-`<repo>/.attest/agents/<name>.yaml`（仓库里的优先）。每个角色的 `flags` 必须固定其
-agent 的权限——Claude Code 用 `--permission-mode acceptEdits`，Codex 用
-`-a on-request -s workspace-write`——所以角色不会继承你 shell 的权限模式。
-Claude Code 角色会装上生命周期钩子（`UserPromptSubmit`、`PermissionRequest`、
-`PostToolBatch`、`Stop`、`Notification`）和状态栏以读取上下文；Codex 角色则读它
-自己的会话日志。适配器字段与回退规则见
-[使用指南](docs/guide.zh-CN.md#agent-适配器)。
+按键：`1`–`6`/`Tab` 切页，`↑↓`/`j k` 选择，`Enter` 展开详情，`o` 打开角色窗口，
+`s` 发送消息，`d` 跳到 diff，`v` 看计划，`a`/`c` 回答关卡，`?` 帮助，`q` 退出。
+`中/EN`（或 `L`）切换中英文，选择保存在 `~/.config/attest/settings.json`。
 
 ## 依赖选择
 
-通用工作交给成熟库，每一个都有明确用途：`yaml` 解析计划、`zod` 校验适配器与
-决策响应、`execa` 执行进程、`picocolors` 终端着色、`string-width` 计算显示宽度、
-`p-retry` 对有界幂等调用重试。属于产品本身的部分保持自研，因为它们的精确输出就是
-契约：单元格画布、动效与面板渲染（纯文本 golden 测试）、事件日志折叠与实时状态
-读取、哈希链账本，以及带类型的决策协议。见
-[docs/dev/contracts.md](docs/dev/contracts.md#5-library-policy) 与 [NOTICE](NOTICE)。
+通用工作交给成熟库：`yaml`（计划解析）、`zod`（适配器、结果、Jev 响应校验）、
+`execa`（进程执行）、`picocolors`（TTY 着色）、`string-width`（显示宽度）、
+`p-retry`（有界重试）。属于产品本身的部分保持自研，因为它们的精确输出就是契约：
+单元格画布与面板渲染（golden 测试）、事件日志折叠与实时读取、哈希链账本、
+带类型的决策协议。详见
+[工程契约](docs/dev/contracts.md#5-library-policy) 与 [NOTICE](NOTICE)。
 
 ## 已知限制
 
-- **账本可发现篡改，但不是不可篡改。** 它是本地的只追加链；能整体重写文件的人
-  可以替换它。它没有签名，也没有外部时间戳。
-- **启发式不是 Jev。** 默认提供方是 Attest 自己的确定性打分，标记为
-  `provider: heuristic`。校准按案件、根据记录的结果计算，初期很稀疏；
-  `audit calibrate` 会直说样本不足，而不是猜。
-- **截图不是厂商会话。** 面板帧是真实 CLI 输出，但其中的 agent 二进制是脚本替身，
-  审计决策来自离线启发式。它们展示的是产品界面，不是真实负载下的 Claude Code、
-  Codex 或托管 Jev 模型。
-- **决策模型会被攻击。** 公开研究表明提示注入与对抗后缀可以操纵 Jev 类决策。
-  Attest 把指令排除在状态之外、优先确定性规则、失败即安全——但不要把机密或不可信
-  内容送进远程提供方。
-- **读屏只是回退。** 内置角色的回合由 agent 自己的信号决定（钩子或会话日志），
-  读屏只用于区分"等待对话框"与"正在工作"；无法识别的画面是 `unknown`，绝不会被
-  输入文字。
-- **一台机器、一个用户。** 角色共享案件的 refs 与 objects；这允许提交，但不是角色
-  之间的隔离。边界是 tmux 与 git worktree，不是沙箱。
-- **计划必须批准，批准必须在终端里。** 面板 `a` 或 `attest approve`；CLI 不会替你
-  推送或合并。
-
-## 开发
-
-```sh
-git clone <repo> && cd Attest
-npm ci
-npm run build && npm link   # 把你构建的 attest 放到 PATH
-./check.sh                  # 类型检查、构建、全部测试、身份扫描
-```
-
-`./check.sh` 会跑 `tsc`、身份扫描和完整的 `node:test` 套件，包括面板 golden 与
-真实 tmux 集成测试（没有 tmux 时自动跳过）。要有意重生成面板 golden：
-`UPDATE_GOLDENS=1 node --test tests/draw.node.mjs`，然后阅读 diff。`docs/media/`
-里的截图由 [tools/screenshot](tools/screenshot/README.md) 生成：tmux 里真实的
-`attest panel` 进程，经 `tmux capture-pane -ep` 抓取、渲染为 PNG。参与贡献见
-[CONTRIBUTING.md](CONTRIBUTING.md)。
+- **审计是信号，不是授权。** 真实运行给两个严格在 `touches` 内的构建者打出了两个
+  high `role.boundary`（0.78）。这是 shadow 模式下的真实假阳性；在 `enforce` 下
+  它会阻断 dispatch。请先在 shadow 下积累 outcomes 与校准，再考虑收紧。
+- **校准很稀疏。** 两条结论得到 Brier 0.19，但需要五条以上表格才有意义，十二条
+  以上才会考虑经 holdout 验证的校准映射。`attest audit calibrate` 会如实说明。
+- **账本可发现篡改，但不是不可篡改。** 它是本地只追加链；能整体重写文件的人可以
+  替换它。它没有签名，也没有外部时间戳。
+- **演示停在 MR OK 关卡。** 它没有推送分支、开 MR 或合并；那些步骤需要人和真实
+  远端仓库。CLI 永远不会自己执行它们。
+- **截图是真的，配置是公开的。** agent、提交、测试、合并与托管 Jev 调用都是真的。
+  演示应用刻意很小，key 只在运行时提供；仓库和截图中都不会出现 key。
+  `docs/media/` 里旧的离线/heuristic 截图无需厂商账号即可复现；真实截图需要上面的
+  CLI 与 key。
+- **一台机器、一个用户。** 角色共享案件的 git refs 与 objects；这允许提交，但不是
+  角色之间的隔离。边界是 tmux/worktree，不是沙箱。
 
 ## 延伸阅读
 
-- [使用指南](docs/guide.zh-CN.md)——计划格式、全部命令与选项、面板操作、适配器、
+- [使用指南](docs/guide.zh-CN.md) —— 计划格式、全部命令、面板操作、适配器、
   文件位置、限制。
-- [Jev 审计](docs/jev-audit.zh-CN.md)——带类型的决策、策略、账本、校准、对抗风险、
-  来源。
-- [路线图](ROADMAP.md) · [更新日志](CHANGELOG.md) · [安全](SECURITY.md) ·
-  [贡献](CONTRIBUTING.md)
+- [Jev 审计](docs/jev-audit.zh-CN.md) —— 带类型的决策、策略、账本、校准、
+  对抗风险与来源。
+- [Jev 真实联调](docs/dev/jev-live-verification.md) —— 脱敏的托管提供方证据与
+  请求/响应契约。
+- [截图工具](tools/screenshot/README.md) —— 截图如何捕获与渲染。
+- [路线图](ROADMAP.md) · [变更记录](CHANGELOG.md) · [安全](SECURITY.md) ·
+  [贡献指南](CONTRIBUTING.md)
 
 MIT 许可。第三方声明见 [NOTICE](NOTICE)。Attest 是独立实现，与 TypeSafe AI
 没有隶属或背书关系。

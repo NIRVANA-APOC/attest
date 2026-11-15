@@ -108,6 +108,9 @@ def xterm(n: int) -> tuple[int, int, int]:
 
 SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 CSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+# OSC 8 hyperlinks (Claude Code emits file:// links) and window-title OSC are
+# not visible cells; strip them before parsing or their payload leaks into text.
+OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 
 class Style:
@@ -196,6 +199,7 @@ Cell = tuple[str, int, Style]  # cluster, width, style
 
 
 def parse(text: str) -> list[list[Cell]]:
+    text = OSC.sub('', text)
     rows: list[list[Cell]] = [[]]
     style = Style()
     i = 0

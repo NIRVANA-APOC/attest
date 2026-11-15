@@ -34,8 +34,10 @@ for agent loops, and the shape LangChain exposed in
 Attest does not require a remote decision model to work. The default provider
 is a deterministic offline heuristic; the remote TypeSafe System One provider is an
 opt-in improvement. In both cases the architecture is the same: an answer is a
-signal for policy, never an authorization. The screenshots in this repository
-and the demo case run the offline heuristic; no hosted Jev call appears in them.
+signal for policy, never an authorization. The reproducible demo case in
+`tools/screenshot` runs the offline heuristic; the README screenshots are from a
+separate real run against the hosted provider (`provider: typesafe`,
+`jev-1.14.0`).
 
 ## What a typed decision model is
 

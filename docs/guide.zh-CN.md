@@ -389,10 +389,10 @@ macOS 上用 Node 20 与 22 跑，并额外在空 locale 下跑一次，以捕�
   `UPDATE_GOLDENS=1 node --test tests/draw.node.mjs`，并在提交前阅读 diff。
 - **身份扫描。** `scripts/check-names.mjs` 拒绝仓库里出现旧项目身份；
   `npm run check` 会运行它。
-- **截图。** `docs/media/*.png` 是 tmux 里真实 `attest panel` 帧，用 Pillow 渲染。
-  图中的 agent 会话是脚本替身，审计决策来自离线 `heuristic` 提供方；画面不包含
-  真实厂商 agent 或托管 Jev API。流程与依赖见
-  [tools/screenshot](../tools/screenshot/README.md)。
+- **截图。** README 截图来自一次真实运行：真实 Claude Code 与 Codex 会话、真实
+  提交与审查、托管 TypeSafe Jev 决策；从 tmux 用 `tmux capture-pane -ep` 捕获并由
+  Pillow 渲染。可离线复现的 [tools/screenshot](../tools/screenshot/README.md)
+  流程仍使用演示适配器与离线 `heuristic` 提供方，并在文档中说明。
 - **文档契约。** `tests/docs-contract.node.mjs` 检查文档里出现的命令确实存在于
   `attest --help`、每个本地图片引用都存在，以及两个 README 引用同一组截图。
 

@@ -5,7 +5,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 const banned = [['tro', 'upe'].join(''), ['trou', 'ple'].join(''), ['hiti', 'anqi'].join(''), ['tianq', 'iz'].join(''), ['Prover', 'Technology'].join('-')]
-const skip = new Set(['node_modules', 'dist', '.git', '.npm-cache', '.attest'])
+const skip = new Set(['node_modules', 'dist', '.git', '.npm-cache', '.attest', '.scratch', '.tools'])
 const files = []
 const walk = dir => {
   for (const name of readdirSync(dir)) {
