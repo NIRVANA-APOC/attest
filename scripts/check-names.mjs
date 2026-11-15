@@ -13,7 +13,7 @@ const walk = dir => {
     const path = join(dir, name)
     const stat = statSync(path)
     if (stat.isDirectory()) walk(path)
-    else if (!/\.(png|jpg|jpeg|gif|ico|woff2?)$/i.test(name)) files.push(path)
+    else if (!/\.(png|jpe?g|gif|ico|webp|woff2?|mp4|webm|mov|mkv|zip|tgz|gz|pdf|ttf|otf)$/i.test(name)) files.push(path)
   }
 }
 walk(process.cwd())

@@ -42,6 +42,18 @@ sessions: Claude Code on <code>deepseek-flash</code> (search) and Codex on
 strip has already passed Plan and Plan OK?. The percentage on each card is the agent's
 reported context use, not a guess.</sub></p>
 
+## Watch the 60-second demo
+
+<p align="center">
+  <a href="docs/media/attest-demo.mp4"><img src="docs/media/attest-demo-poster.png" width="900" alt="Watch the 60-second Attest live-run demo"></a>
+  <br>
+  <sub><b>▶ The 60-second real run</b> — 1080p MP4, captioned, silent. The whole arc:
+  plan gate → two real builders → review → audit → MR OK gate.</sub>
+</p>
+
+[Watch or download the MP4](docs/media/attest-demo.mp4) · regenerate it with
+[tools/video](tools/video/README.md).
+
 ## Contents
 
 [The run, minute by minute](#the-run-minute-by-minute) · [The plan gate](#1-the-plan-gate) ·

@@ -40,6 +40,18 @@ Jev 模型做出审计决策，每一帧都是从运行中的 tmux pane 捕获�
 流程图上两个角色同时处于 working，阶段条已经越过 Plan 和 Plan OK?。卡片上的百分比是
 agent 自己上报的上下文占用，不是估算。</sub></p>
 
+## 观看 60 秒演示
+
+<p align="center">
+  <a href="docs/media/attest-demo.mp4"><img src="docs/media/attest-demo-poster.png" width="900" alt="观看 60 秒 Attest 真实运行演示"></a>
+  <br>
+  <sub><b>▶ 60 秒真实运行</b>——1080p MP4、带字幕、无音轨。完整走一遍：
+  计划关卡 → 两个真实构建者 → 审查 → 审计 → MR OK 关卡。</sub>
+</p>
+
+[观看或下载 MP4](docs/media/attest-demo.mp4) · 重新生成见
+[tools/video](tools/video/README.md)。
+
 ## 目录
 
 [逐分钟运行记录](#逐分钟运行记录) · [计划关卡](#1-计划关卡) · [构建](#2-构建) ·
