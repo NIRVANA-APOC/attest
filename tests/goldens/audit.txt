@@ -1,0 +1,40 @@
+ attest  auth-refresh  ·  Build                                 ◆ 1 needs you  ·  12:07   中/EN
+  1 CASE   2 ROLES   3 PLAN   4 LOG   5 DIFF   6 AUDIT
+                                Refresh tokens rotate on every use, and a reused one is refused
+────────────────────────────────────────────────────────────────────────────────────────────────
+▌ ◆ api    waits on you · Trust this folder?                                      o Open window
+
+ ▍ LEDGER ───────────────────────────────────────────│ ▍ DECISION ─────────────────────────────
+  ✓ chain verified · 12 records · last 12:06         │  #11 merge.risk
+  mode shadow · provider heuristic                   │  high · shadow · p 0.82
+  ◆ risk high · 2 decisions need review              │  heuristic · 12:06
+                                                     │
+ ▍ BANDS ────────────────────────────────────────────│  reason
+  allow 4  ·  ask 2  ·  block 1  ·  shadow 5         │   The diff rewrites the token store
+                                                     │   migration while the plan declares it
+ ▍ DECISIONS ────────────────────────────────────────│   out of scope. Record the deviation or
+ ▸ 12:06  merge.risk      high    shadow 0.82        │   1 more line
+   12:05  result.fidelity medium  shadow 0.55        │
+   10:41  plan.risk       low     shadow 0.12        │  state digest
+   10:40  review.triage   unknown shadow    —        │   sha256:3f9a0c1e5b7d
+                                                     │
+                                                     │ ▍ CALIBRATION ──────────────────────────
+                                                     │  Brier 0.18 · 8 outcomes
+                                                     │  0.0-0.2 █░░░░░░░░░ 3
+                                                     │  0.2-0.4 ███░░░░░░░ 2
+                                                     │  0.4-0.6 ███████░░░ 1
+                                                     │  0.6-0.8 ██████░░░░ 1
+                                                     │  0.8-1.0 █████████░ 1
+
+
+
+
+
+
+
+
+
+
+
+
+ ↑↓ decision   ⏎ reason and digest   PgUp PgDn scroll                         1-6 tabs   ? help

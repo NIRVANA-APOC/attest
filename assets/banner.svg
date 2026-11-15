@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">Attest — one command calls up an attested agent team</title>
+  <desc id="desc">Wordmark Attest beside a chain of four workflow nodes: plan, build, review, audit.</desc>
+  <defs>
+    <linearGradient id="link" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9ac2ff"/>
+      <stop offset="1" stop-color="#6fa8ff"/>
+    </linearGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1200" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6fa8ff" stop-opacity="0"/>
+      <stop offset="0.35" stop-color="#6fa8ff"/>
+      <stop offset="0.72" stop-color="#98c379"/>
+      <stop offset="1" stop-color="#98c379" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.86" cy="0.1" r="0.75">
+      <stop offset="0" stop-color="#6fa8ff" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#6fa8ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="360" rx="26" fill="#151821"/>
+  <rect width="1200" height="360" rx="26" fill="url(#glow)"/>
+  <rect x="1" y="1" width="1198" height="358" rx="25" fill="none" stroke="#2c3446"/>
+
+  <!-- mark + wordmark -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(64 86)">
+    <path d="M78 0 L117 22 L117 67 L78 89 L39 67 L39 22 Z" stroke="url(#link)" stroke-width="7"/>
+    <path d="M56 50 L72 66 L101 31" stroke="#98c379" stroke-width="9"/>
+    <path d="M31 44 L13 44" stroke="#4e6991" stroke-width="6"/>
+    <path d="M125 44 L143 44" stroke="#4e6991" stroke-width="6"/>
+  </g>
+  <text x="256" y="164" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="92" font-weight="700" letter-spacing="1" fill="#e8eaf0">attest</text>
+  <text x="260" y="216" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="25" fill="#c3c9d4">One command calls up an attested agent team.</text>
+  <text x="260" y="252" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#9aa3ad">Each role in its own tmux window and git worktree.</text>
+  <text x="260" y="280" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#9aa3ad">Every gate, stage and Jev decision in a tamper-evident ledger.</text>
+
+  <!-- the chain: the workflow, as the panel draws it -->
+  <g font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace">
+    <path d="M706 132 H1086" stroke="#2c3446" stroke-width="3" stroke-dasharray="2 9" stroke-linecap="round"/>
+    <g>
+      <circle cx="726" cy="132" r="27" fill="#1d2230" stroke="#98c379" stroke-width="2.5"/>
+      <text x="726" y="141" text-anchor="middle" font-size="22" fill="#98c379">✓</text>
+      <text x="726" y="186" text-anchor="middle" font-size="14" letter-spacing="1" fill="#9aa3ad">plan</text>
+    </g>
+    <g>
+      <circle cx="866" cy="132" r="27" fill="#1d2230" stroke="#98c379" stroke-width="2.5"/>
+      <text x="866" y="141" text-anchor="middle" font-size="22" fill="#98c379">✓</text>
+      <text x="866" y="186" text-anchor="middle" font-size="14" letter-spacing="1" fill="#9aa3ad">build</text>
+    </g>
+    <g>
+      <circle cx="1006" cy="132" r="27" fill="#1d2230" stroke="#98c379" stroke-width="2.5"/>
+      <text x="1006" y="141" text-anchor="middle" font-size="22" fill="#98c379">✓</text>
+      <text x="1006" y="186" text-anchor="middle" font-size="14" letter-spacing="1" fill="#9aa3ad">review</text>
+    </g>
+    <g>
+      <circle cx="1146" cy="132" r="27" fill="#1d2230" stroke="#f4be5c" stroke-width="2.5"/>
+      <text x="1146" y="141" text-anchor="middle" font-size="22" fill="#f4be5c">◆</text>
+      <text x="1146" y="186" text-anchor="middle" font-size="14" letter-spacing="1" fill="#9aa3ad">audit</text>
+    </g>
+  </g>
+
+  <rect x="0" y="330" width="1200" height="4" fill="url(#rule)"/>
+  <text x="64" y="312" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" letter-spacing="1.6" fill="#4e6991">tmux · git worktrees · Claude Code + Codex · shadow or enforce</text>
+</svg>

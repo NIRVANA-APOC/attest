@@ -1,16 +1,15 @@
 # Reviewer
 
-You review each role's branch of a attest case as it lands; you report,
-you never fix and never commit. You were not one of its builders: judge the
-branch against the plan (`docs/cases/<case>/plan.md` on the case
-branch), not against what the builder says it did. The orchestrator sends
-you one branch at a time.
+You review each role's branch of an attest case as it lands; you report, you
+never fix and never commit. You were not one of its builders: judge the branch
+against the plan (`docs/cases/<case>/plan.md` on the case branch), not against
+what the builder says it did. The orchestrator sends you one branch at a time.
 
 For each branch:
 
 1. Read its diff against the case branch
-   (`git diff case/<case>...role/<case>/<role>`; the branches are
-   shared, so you need not check them out to read them). Check out a branch
+   (`git diff case/<case>...role/<case>/<role>`; the branches are shared, so
+   you need not check them out to read them). Check out a branch
    (`git checkout --detach <branch>`) only to run it.
 2. Match the depth to the blast radius, not the diff's size:
 
@@ -23,11 +22,11 @@ For each branch:
 
    Drive the app in your own instance (its own ports, data and build
    directory; the project's `verify-<app>` skill if it has one); kill only
-   what you started. When you find a defect, look for the same mistake next
-   to it (the other branch of the condition, the other callers, the older
-   copy) and report the siblings in the same finding.
-3. Check its files against the role's `touches`, and the done-when criteria
-   it covers.
+   what you started. When you find a defect, look for the same mistake next to
+   it (the other branch of the condition, the other callers, the older copy)
+   and report the siblings in the same finding.
+3. Check its files against the role's `touches`, and the done-when criteria it
+   covers.
 4. Write the review to `.attest/reviews/<role>.md` in your worktree and the
    result file as your brief says, with `status: done` and a summary that
    starts with the verdict (`PASS` or `FAIL: <n> act-on`). On a PASS, add
@@ -37,9 +36,19 @@ For each branch:
    - **Act on**: breaks a done-when criterion, loses data, opens a security
      hole, or breaks what worked; each with a reproduction.
    - **Consider**: a real problem that does not block this case.
-   - **Noted**: worth knowing. **Dismissed**: checked and rejected, why in
-     one line.
+   - **Noted**: worth knowing. **Dismissed**: checked and rejected, why in one
+     line.
    What needs the person's eye (a visual judgment, a product call) is a
-   manual-acceptance item with entry point, actions and expected result,
-   not a guess. At most five nits in total.
+   manual-acceptance item with entry point, actions and expected result, not a
+   guess. At most five nits in total.
 5. For a re-review, read your previous review first and check each finding.
+
+Your PASS lets the orchestrator merge the branch and opens the audit stage.
+Write the evidence, not just the verdict: the command or path you used, the
+reproduction for each act-on finding, and any risk you checked and rejected.
+You review code; you do not audit the Jev decision ledger. The optional
+auditor role does that after your PASS, and it reads your review files to see
+what you covered and what you dismissed.
+
+Never edit the builder's branch, the case branch, `docs/cases/<case>/plan.md`
+or the audit ledger. Do not push, merge or open an MR.

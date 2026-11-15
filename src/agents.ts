@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { z } from 'zod'
+
 import { TONES } from './canvas.ts'
 import type { Tone } from './canvas.ts'
 import type { Role } from './plan.ts'
@@ -119,6 +121,9 @@ type Map = { [key: string]: Yaml }
 const isMap = (value: Yaml | undefined): value is Map => typeof value === 'object' && value !== null && !Array.isArray(value)
 const KEYS = ['command', 'model', 'effort', 'permission', 'prompt', 'screen', 'paste', 'badge', 'usage']
 const STATES = ['waits', 'working', 'ready'] as const
+const TONE_NAMES = Object.keys(TONES) as [Tone, ...Tone[]]
+const STRINGS = z.array(z.string())
+const FLAG = z.string().regex(/^--?[^\s=]+$/)
 
 const lineOf = (source: string, field: string): number => {
   const parents: { indent: number; key: string }[] = []
@@ -140,9 +145,10 @@ const readAgent = (source: string): Agent => {
     throw new Error(`line ${lineOf(source, field)}: ${field || 'adapter'} ${why}`)
   }
   const strings = (value: Yaml | undefined, field: string): string[] => {
-    if (!Array.isArray(value) || !value.every((one): one is string => typeof one === 'string')) return fail(field, 'must be a list of strings')
+    const parsed = STRINGS.safeParse(value)
+    if (!parsed.success) return fail(field, 'must be a list of strings')
 
-    return value
+    return parsed.data
   }
   const data = parseYaml(source)
   if (!isMap(data)) return fail('', 'must be a mapping')
@@ -150,10 +156,11 @@ const readAgent = (source: string): Agent => {
   if (typeof data.command !== 'string' || data.command.trim() === '') return fail('command', 'must be a nonempty string')
   const model = strings(data.model, 'model')
   const effort = strings(data.effort, 'effort')
-  if (!Array.isArray(data.permission) || data.permission.length === 0) return fail('permission', 'must be a nonempty list of flag groups')
-  const permission = data.permission.map(group => {
-    const flags = strings(group, 'permission')
-    if (flags.length === 0 || flags.some(flag => !/^--?[^\s=]+$/.test(flag))) fail('permission', 'groups must contain flag names')
+  const groups = z.array(z.unknown()).min(1).safeParse(data.permission)
+  if (!groups.success) return fail('permission', 'must be a nonempty list of flag groups')
+  const permission = groups.data.map(group => {
+    const flags = strings(group as Yaml, 'permission')
+    if (flags.length === 0 || flags.some(flag => !FLAG.safeParse(flag).success)) fail('permission', 'groups must contain flag names')
 
     return flags
   })
@@ -184,8 +191,25 @@ const readAgent = (source: string): Agent => {
     badge = { glyph: data.badge.glyph, tone: data.badge.tone as Tone }
   }
 
-  return { command: data.command, model, effort, permission, prompt: data.prompt, screen, paste: data.paste, ...(badge && { badge }), ...(usage === undefined ? {} : { usage }) }
+  // The YAML only becomes an Agent through this schema: every field the rest of the program relies on is checked here.
+  const built = AGENT.safeParse({ command: data.command, model, effort, permission, prompt: data.prompt, screen, paste: data.paste, ...(badge && { badge }), ...(usage === undefined ? {} : { usage }) })
+  if (!built.success) return fail('', 'is not a valid adapter')
+
+  return built.data
 }
+
+/** The adapter shape as the program uses it, checked once at the untrusted YAML boundary. */
+const AGENT = z.object({
+  usage: z.enum(['claude', 'codex']).optional(),
+  badge: z.object({ glyph: z.string(), tone: z.enum(TONE_NAMES) }).optional(),
+  command: z.string().min(1),
+  model: z.array(z.string()),
+  effort: z.array(z.string()),
+  permission: z.array(z.array(z.string()).min(1)),
+  prompt: z.literal('last-arg'),
+  screen: z.object({ waits: z.array(z.string()), working: z.array(z.string()), ready: z.array(z.string()) }),
+  paste: z.literal('bracketed'),
+})
 
 /** Files replace an adapter in full: built-ins, then home, then repository. Problems must be resolved before use. */
 export const loadAgents = (root: string, home: string): { agents: Record<string, Agent>; problems: string[] } => {

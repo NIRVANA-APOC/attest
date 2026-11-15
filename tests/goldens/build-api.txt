@@ -1,5 +1,5 @@
  attest  auth-refresh  ·  Build                                 ◆ 1 needs you  ·  12:07   中/EN
-  1 CASE   2 ROLES   3 PLAN   4 LOG   5 DIFF
+  1 CASE   2 ROLES   3 PLAN   4 LOG   5 DIFF   6 AUDIT
                                 Refresh tokens rotate on every use, and a reused one is refused
 ────────────────────────────────────────────────────────────────────────────────────────────────
 ▌ ◆ api    waits on you · Trust this folder?                                      o Open window
@@ -17,18 +17,18 @@
   ✓ Plan OK?        10:42  │   │    ╎                             │
   ● Build             0/3  │   │    ╎ after api                   │
   ○ Review            0/1  │   │    ╎ ┌────────────────────────┐  │   ┌──────────────────────┐
-  ◇ MR OK?                 │   │    ╎ │ ○ web          planned │  │   │ ○ review     planned │
-  ○ Open MR                │   │    └▶│ ✻ claude sonnet        │──┼──▶│ ✻ claude sonnet      │
-  ◇ Merged?                │   │      │ ◼◼◻◻◻ medium           │  │   │ ◼◼◼◻◻ high           │
-  ○ Teardown               │   │      └────────────────────────┘  │   └──────────────────────┘
+  ○ Audit                  │   │    ╎ │ ○ web          planned │  │   │ ○ review     planned │
+  ◇ MR OK?                 │   │    └▶│ ✻ claude sonnet        │──┼──▶│ ✻ claude sonnet      │
+  ○ Open MR                │   │      │ ◼◼◻◻◻ medium           │  │   │ ◼◼◼◻◻ high           │
+  ◇ Merged?                │   │      └────────────────────────┘  │   └──────────────────────┘
+  ○ Teardown               │   │                                  │
                            │   │                                  │
-─ ACTIVITY ─────────────── │   │                                  │
- 12:07 dispatched store    │   │  ┌────────────────────────┐      │
- 12:07 dispatched api      │   │  │ ● store        working │      │
- 10:42 stage: build        │   └─▶│ ✻ claude opus          │──────┘
- 10:42 plan approved       │      │ ◼◼◼◻◻ high             │
- 10:41 plan gate opened    │      └────────────────────────┘
-                           │
+─ ACTIVITY ─────────────── │   │  ┌────────────────────────┐      │
+ 12:07 dispatched store    │   │  │ ● store        working │      │
+ 12:07 dispatched api      │   └─▶│ ✻ claude opus          │──────┘
+ 10:42 stage: build        │      │ ◼◼◼◻◻ high             │
+ 10:42 plan approved       │      └────────────────────────┘
+ 10:41 plan gate opened    │
                            │
                            │ ─ ◆ api · waits on you ────────────────────────────────────────────
                            │  goal     Rotate the token on refresh; refuse a reused one with 401
@@ -55,4 +55,4 @@
                            │
                            │
 
- ↑↓  role   ⏎  detail   o  open   s  send   d  diff   1-5  tabs   ?  help
+ ↑↓  role   ⏎  detail   o  open   s  send   d  diff   1-6  tabs   ?  help

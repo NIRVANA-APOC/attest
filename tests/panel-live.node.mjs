@@ -15,6 +15,7 @@ import { append, readLog } from '../dist/log.js'
 import { flushAnswers } from '../dist/orchestrator.js'
 import { panelEffect } from '../dist/panel-actions.js'
 import { gateTarget, hitAt, initialUi, parseInput, transition } from '../dist/panel-input.js'
+import { appendDecision, appendOutcome, ledgerPath } from '../dist/jev/ledger.js'
 import { readPanel } from '../dist/panel-model.js'
 import { ENTER_PANEL, frameOf, LEAVE_PANEL, panel, terminalFrame } from '../dist/panel.js'
 
@@ -56,7 +57,9 @@ const world = t => {
       if (raw.includes('--show-toplevel')) return yes(root)
       if (raw.includes('--git-common-dir')) return yes('.git')
       if (raw[0] === 'symbolic-ref') return yes(head.branch)
-      if (raw[0] === 'diff') return yes('src/api.ts\n')
+      // state.ts reads changes from git plumbing: `diff --numstat -z` then the hunks.
+      if (raw.includes('--numstat')) return yes('1\t0\tsrc/api.ts\0')
+      if (raw.includes('diff')) return yes('')
       return yes()
     }
     if (command === 'ps') return { code: 1, out: '', err: '' }
@@ -130,7 +133,9 @@ test('selection, tabs, detail, help, scrolling and hit-map actions are pure', t 
   assert.equal(step(ui, key('down'), model).ui.selected, 'web')
   assert.equal(step({ ...ui, selected: 'web' }, key('k'), model).ui.selected, 'api')
   assert.equal(step(ui, key('5'), model).ui.tab, 5)
-  assert.equal(step({ ...ui, tab: 5 }, key('tab'), model).ui.tab, 1)
+  assert.equal(step(ui, key('6'), model).ui.tab, 6, 'the sixth tab is AUDIT')
+  assert.equal(step({ ...ui, tab: 5 }, key('tab'), model).ui.tab, 6, 'Tab cycles through six tabs')
+  assert.equal(step({ ...ui, tab: 6 }, key('tab'), model).ui.tab, 1)
   assert.equal(step(ui, key('d'), model).ui.tab, 5)
   assert.equal(step(ui, key('v'), model).ui.tab, 3)
   assert.equal(step({ ...ui, tab: 2 }, key('enter'), model).ui.tab, 1)
@@ -551,4 +556,100 @@ test('too-small resize blocks approval and hidden change submission until conten
   assert.equal(w.events().at(-1).text, 'Please revise')
   stop.abort()
   assert.equal((await running).code, 0)
+})
+
+// ---- AUDIT page (qa/task-6): a real hash-chained Jev ledger, rendered by the real panel.
+const auditOutcome = (id, probability, band, action, reason, digest, second) => ({
+  id,
+  at: `2026-11-15T12:0${second}:00.000Z`,
+  provider: 'heuristic',
+  stateDigest: digest,
+  answers: { risk: { kind: 'noul', probability } },
+  band,
+  action,
+  reason,
+  latencyMs: 3,
+  reasonCode: 'policy.shadow',
+})
+const ledgerOf = (w) => ledgerPath(join(w.root, '.git'), 'm1')
+
+test('panel AUDIT page renders the Jev ledger: chain, mode/provider, bands, risk, newest-first decisions, digest and calibration', t => {
+  const w = world(t)
+  w.openGate()
+  const ledger = ledgerOf(w)
+  appendDecision(ledger, auditOutcome('plan.risk', 0.82, 'high', 'shadow', 'the plan runs a destructive command', `sha256:${'ab'.repeat(32)}`, 1))
+  appendDecision(ledger, auditOutcome('result.fidelity', 0.12, 'low', 'shadow', 'the diff matches the brief', `sha256:${'cd'.repeat(32)}`, 2))
+  appendOutcome(ledger, { id: 'plan.risk', observed: 'defect', source: 'human', note: 'the destructive step was real' })
+
+  const reading = w.read()
+  const audit = reading.model.audit
+  assert.ok(audit, 'the panel model carries the audit view once the ledger has records')
+  assert.equal(audit.enabled, true)
+  assert.equal(audit.chain.ok, true)
+  assert.equal(audit.chain.length, 3)
+  assert.equal(audit.chain.brokenAt, undefined)
+  assert.deepEqual(audit.counts, { allow: 0, ask: 0, block: 0, shadow: 2 })
+  assert.equal(audit.risk, 'high')
+  assert.equal(audit.mode, 'shadow')
+  assert.equal(audit.provider, 'heuristic')
+  assert.equal(audit.decisions.length, 2)
+  assert.equal(audit.decisions[0].stateDigest, `sha256:${'ab'.repeat(32)}`)
+  assert.equal(audit.calibration.n, 1)
+  assert.equal(typeof audit.calibration.brier, 'number')
+
+  const drawn = draw(reading.model, { ...initialUi(), tab: 6 }, 96, 40)
+  const text = drawn.lines.map(textOf).join('\n')
+  assert.match(text, /AUDIT/)
+  assert.match(text, /chain verified/)
+  assert.match(text, /3 records/)
+  assert.match(text, /mode shadow/)
+  assert.match(text, /provider heuristic/)
+  assert.match(text, /risk high/)
+  assert.match(text, /shadow 2/)
+  assert.match(text, /Brier \d\.\d\d/)
+  assert.match(text, /1 outcome/)
+  // newest first: the newest decision is #1 result.fidelity, its digest is in the detail column.
+  assert.match(text, /result\.fidelity/)
+  assert.match(text, new RegExp(`sha256:${'cd'.repeat(32).slice(0, 12)}`))
+  // j/k moves the audit cursor, Enter opens the full reason, Escape closes it.
+  let ui = { ...initialUi(), tab: 6 }
+  ui = step(ui, key('j'), reading.model, drawn.hits).ui
+  assert.equal(ui.decision, 0, 'j moves to the older decision')
+  ui = step(ui, key('enter'), reading.model, drawn.hits).ui
+  assert.equal(ui.auditOpen, true)
+  const moved = draw(reading.model, ui, 96, 40)
+  assert.match(moved.lines.map(textOf).join('\n'), /the plan runs a destructive command/)
+  assert.match(moved.lines.map(textOf).join('\n'), /sha256:abab/)
+  assert.equal(step(ui, key('enter'), reading.model, drawn.hits).ui.auditOpen, false)
+})
+
+test('panel AUDIT page explains a missing ledger and reports a tampered chain with the record number', t => {
+  const w = world(t)
+  w.openGate()
+  assert.equal(w.read().model.audit, undefined, 'no ledger means no audit view')
+  const empty = draw(w.read().model, { ...initialUi(), tab: 6 }, 96, 40).lines.map(textOf).join('\n')
+  assert.match(empty, /AUDIT/)
+  assert.match(empty, /Audit is not recorded for this case/)
+  assert.match(empty, /audit: block/)
+  assert.match(empty, /attest stage audit/)
+
+  const ledger = ledgerOf(w)
+  appendDecision(ledger, auditOutcome('plan.risk', 0.7, 'medium', 'ask', 'review the migration', `sha256:${'11'.repeat(32)}`, 3))
+  appendDecision(ledger, auditOutcome('merge.risk', 0.9, 'high', 'block', 'unreviewed risk', `sha256:${'22'.repeat(32)}`, 4))
+  // Edit a middle record after the chain was sealed: its hash no longer matches.
+  const lines = readFileSync(ledger, 'utf8').trimEnd().split('\n')
+  const tampered = JSON.parse(lines[1])
+  tampered.payload.reason = 'edited after the fact'
+  lines[1] = JSON.stringify(tampered)
+  writeFileSync(ledger, `${lines.join('\n')}\n`)
+
+  const audit = w.read().model.audit
+  assert.ok(audit)
+  assert.equal(audit.chain.ok, false)
+  assert.equal(audit.chain.brokenAt, 1)
+  assert.equal(audit.chain.length, 1, 'only the records before the break verify')
+  assert.match(audit.verdict, /broken at record 1/)
+  const text = draw(w.read().model, { ...initialUi(), tab: 6 }, 96, 40).lines.map(textOf).join('\n')
+  assert.match(text, /chain broken/i)
+  assert.match(text, /record 1/)
 })

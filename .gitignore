@@ -5,3 +5,7 @@ dist/
 *.log
 .DS_Store
 coverage/
+.scratch/
+.tools/
+.venv/
+__pycache__/

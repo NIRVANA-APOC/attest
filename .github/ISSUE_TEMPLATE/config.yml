@@ -1,5 +1,1 @@
 blank_issues_enabled: true
-contact_links:
-  - name: Security vulnerability
-    url: https://github.com/hitianqi/attest/security/advisories/new
-    about: Report it privately, not in an issue.

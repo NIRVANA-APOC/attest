@@ -30,6 +30,13 @@ export type Role = {
   reviews: string[]
   group: string
 }
+/**
+ * The optional `audit:` block: passed through as written so the Jev loader owns defaults and validation.
+ * Missing or malformed fields are simply absent; they never become deterministic plan problems.
+ */
+export type PlanAudit = { mode?: string; provider?: string; questions?: string[] }
+/** What an omitted `audit:` block means (contracts.md §3): shadow decisions from the offline heuristic. */
+export const DEFAULT_AUDIT = { mode: 'shadow', provider: 'heuristic', questions: ['plan.risk', 'plan.clarity', 'result.fidelity', 'merge.risk', 'teardown.safety'] }
 export type Plan = {
   title: string
   goal: string
@@ -39,12 +46,13 @@ export type Plan = {
   /** The `## Done when` section's bullets. */
   doneWhen: string[]
   roles: Role[]
+  audit: PlanAudit
   problems: string[]
 }
 
 const NAME = /^[a-z][a-z0-9-]*$/
 const ROLE_KEYS = ['use', 'agent', 'model', 'effort', 'flags', 'touches', 'depends_on', 'goal', 'text', 'skills', 'reviews', 'group']
-const PLAN_KEYS = ['attest', 'goal', 'why', 'workflow', 'base', 'profiles', 'roles']
+const PLAN_KEYS = ['attest', 'goal', 'why', 'workflow', 'base', 'profiles', 'roles', 'audit']
 export const DEFAULT_WORKFLOW = 'attest-case'
 
 type Map = { [key: string]: Yaml }
@@ -81,7 +89,7 @@ export const readPlan = (source: string, agents: Record<string, Agent> = AGENTS)
   const title = /^# +(.+)$/m.exec(source)?.[1]?.trim() ?? ''
   const sections = sectionsOf(source)
   const doneWhen = bullets(sections.find(section => /^done when$/i.test(section.heading))?.body ?? '')
-  const empty: Plan = { title, goal: '', why: '', workflow: DEFAULT_WORKFLOW, base: '', doneWhen, roles: [], problems: [] }
+  const empty: Plan = { title, goal: '', why: '', workflow: DEFAULT_WORKFLOW, base: '', doneWhen, roles: [], audit: {}, problems: [] }
 
   const fence = /```ya?ml\n([\s\S]*?)```/g
   let found: RegExpExecArray | null = null
@@ -161,7 +169,21 @@ export const readPlan = (source: string, agents: Record<string, Agent> = AGENTS)
     workflow: text(data.workflow) || DEFAULT_WORKFLOW,
     base: text(data.base),
     roles,
+    audit: auditOf(data.audit),
     problems: [...problems, ...checkRoles(roles, agents, Object.keys(data.roles))],
+  }
+}
+
+/** The `audit:` block normalized to the strings it holds; everything else is left for the Jev loader to judge. */
+const auditOf = (value: Yaml | undefined): PlanAudit => {
+  if (!isMap(value)) return {}
+  const mode = text(value.mode)
+  const provider = text(value.provider)
+
+  return {
+    ...(mode === '' ? {} : { mode }),
+    ...(provider === '' ? {} : { provider }),
+    ...(Array.isArray(value.questions) ? { questions: texts(value.questions) } : {}),
   }
 }
 

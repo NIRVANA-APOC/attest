@@ -12,7 +12,7 @@ import { tmux } from './run.ts'
 import { planHash } from './state.ts'
 
 // Several cases can be open at once. Each has its own worktree on branch
-// `case/<m>` and is bound to its orchestrator's pane (`@attest-case`,
+// `case/<case>` and is bound to its orchestrator's pane (`@attest-case`,
 // with the repository's common git dir in `@attest-case-repo`, so a pane
 // in another repository never matches). A panel pane names its orchestrator
 // in `@attest-panel-orchestrator` and follows that pane's binding; one named
@@ -29,7 +29,7 @@ export class Unresolved extends Refusal {
 
 export const caseTree = (repo: Repository, name: string): string => join(repo.root, '.attest/cases', name)
 
-/** Each worktree on a `case/<m>` branch, by case name. */
+/** Each worktree on a `case/<case>` branch, by case name. */
 export const caseTrees = (r: Runtime, repo: Repository): Map<string, string> => {
   const trees = new Map<string, string>()
   for (const entry of git(r, repo.root, ['worktree', 'list', '--porcelain', '-z']).split('\0\0')) {
@@ -115,7 +115,7 @@ export const callerOf = (r: Runtime): string | undefined => callerPane(r, rootOf
 
 /**
  * The case a command acts on, in order: `-m`; the caller pane's binding;
- * a panel's orchestrator's binding; the current worktree's `case/<m>`
+ * a panel's orchestrator's binding; the current worktree's `case/<case>`
  * branch. `-m` naming another case than the caller's binding refuses.
  */
 export const resolveCase = (r: Runtime, repo: Repository, want: string): string => {
@@ -175,7 +175,7 @@ export const caseOf = (r: Runtime, want = ''): Case => {
 }
 
 /**
- * Creates the case's worktree on a new `case/<m>` branch, cut from the
+ * Creates the case's worktree on a new `case/<case>` branch, cut from the
  * main checkout's HEAD (or `base`), with the skill's plan template. git
  * refuses a branch or worktree that already exists. The main checkout's
  * branch never changes.

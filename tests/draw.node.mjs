@@ -88,7 +88,7 @@ test('stages: done with the answer time, now, groups counted, gates ahead', () =
   const m = model(APPROVED, BUILDING)
   assert.deepEqual(
     m.stages.map(stage => `${stage.mark} ${stage.label} ${stage.note}`.trim()),
-    ['done Plan', 'done Plan OK? 10:42', 'now Build 0/3', 'todo Review 0/1', 'gate MR OK?', 'todo Open MR', 'gate Merged?', 'todo Teardown'],
+    ['done Plan', 'done Plan OK? 10:42', 'now Build 0/3', 'todo Review 0/1', 'todo Audit', 'gate MR OK?', 'todo Open MR', 'gate Merged?', 'todo Teardown'],
   )
   const read = readStages(readFileSync(here('../skills/attest-case/stages.yaml'), 'utf8'))
   assert.deepEqual(read.problems, [])
@@ -110,7 +110,7 @@ test('in Chinese every line fits its width in cells and every click target sits 
   setLang('zh')
   try {
     const asked = [...APPROVED, { at: at('12:30'), by: 'orch', ev: 'gate-open', gate: 'mr-ok', ask: '开 MR 吗？' }]
-    for (const log of [APPROVED, APPROVED.slice(0, 1), asked]) for (const width of [96, 60]) for (const tab of [1, 2, 3, 4, 5]) {
+    for (const log of [APPROVED, APPROVED.slice(0, 1), asked]) for (const width of [96, 60]) for (const tab of [1, 2, 3, 4, 5, 6]) {
       const drawn = draw(model(log, BUILDING), { tab, selected: 'api' }, width, 40)
       const lines = drawn.lines.map(textOf)
       for (const line of lines) assert.ok(widthOf(line) <= width, `${width} cols, tab ${tab}: ${line}`)
@@ -494,6 +494,112 @@ test('DIFF: each role\'s files as a tree, the file under the cursor as hunks wit
   assert.deepEqual(transition({ tab: 5, selected: 'api' }, { kind: 'click', row: hit.row, col: hit.col + 3 }, m, drawn.hits, 30, drawn.maxScroll).ui.file, 'store\tsrc/store/tokens.ts')
   assert.equal(transition(ui, key('d'), m, drawn.hits, 30, drawn.maxScroll).ui.file, undefined, 'd shows the selected role\'s first file')
   assert.match(plain(draw(model(APPROVED, new Map()), { tab: 5, selected: 'api' }, 110, 30)).join('\n'), /nothing changed yet/)
+})
+
+const AUDIT = {
+  enabled: true,
+  mode: 'shadow',
+  provider: 'heuristic',
+  chain: { ok: true, length: 12 },
+  counts: { allow: 4, ask: 2, block: 1, shadow: 5 },
+  risk: 'high',
+  verdict: '2 decisions need review',
+  lastAt: at('12:06'),
+  decisions: [
+    { seq: 11, id: 'merge.risk', at: at('12:06'), band: 'high', action: 'shadow', probability: 0.82, provider: 'heuristic', reason: 'The diff rewrites the token store migration while the plan declares it out of scope. Record the deviation or revert it before merge.', stateDigest: 'sha256:3f9a0c1e5b7d' },
+    { seq: 10, id: 'result.fidelity', at: at('12:05'), band: 'medium', action: 'shadow', probability: 0.55, provider: 'heuristic', reason: 'The result claims PASS without done-when evidence.', stateDigest: 'sha256:aa10bb32cc44' },
+    { seq: 9, id: 'plan.risk', at: at('10:41'), band: 'low', action: 'shadow', probability: 0.12, provider: 'heuristic', reason: 'Plan is narrow and reversible.', stateDigest: 'sha256:0123456789ab' },
+    { seq: 8, id: 'review.triage', at: at('10:40'), band: 'unknown', action: 'shadow', provider: 'heuristic', reason: 'No answers recorded.' },
+  ],
+  calibration: {
+    n: 8,
+    brier: 0.18,
+    bins: [
+      { lo: 0, hi: 0.2, n: 3, observed: 0.12 }, { lo: 0.2, hi: 0.4, n: 2, observed: 0.31 }, { lo: 0.4, hi: 0.6, n: 1, observed: 0.72 },
+      { lo: 0.6, hi: 0.8, n: 1, observed: 0.61 }, { lo: 0.8, hi: 1, n: 1, observed: 0.9 },
+    ],
+  },
+}
+const auditModel = (audit = AUDIT) => ({ ...model(APPROVED, BUILDING), audit })
+
+test('AUDIT: chain, mode and provider, band counts, risk verdict, decisions newest first, the selected reason and digest, calibration bars', () => {
+  const m = auditModel()
+  const drawn = draw(m, { tab: 6, selected: 'api' }, 96, 40)
+  golden('audit', plain(drawn))
+  const lines = plain(drawn)
+  const text = lines.join('\n')
+  assert.ok(lines.every(line => line.length <= 96))
+  assert.match(lines[1], /6 AUDIT$/)
+  assert.match(text, /✓ chain verified · 12 records · last 12:06/)
+  assert.match(text, /mode shadow · provider heuristic/)
+  assert.match(text, /◆ risk high · 2 decisions need review/)
+  assert.match(text, /allow 4 {2}· {2}ask 2 {2}· {2}block 1 {2}· {2}shadow 5/)
+  // Newest first, selected, with its band, action and probability.
+  assert.match(text, /▸ 12:06 {2}merge\.risk {6}high {4}shadow {1}0\.82/)
+  assert.match(text, /#11 merge\.risk/)
+  assert.match(text, / reason\b/)
+  assert.match(text, /The diff rewrites the token store/)
+  assert.match(text, /state digest/)
+  assert.match(text, /sha256:3f9a0c1e5b7d/)
+  assert.match(text, /Brier 0\.18 · 8 outcomes/)
+  assert.match(text, / 0\.0-0\.2 █░{9} 3/)
+  // j/k walk the ledger by seq; Enter opens the full reason and digest.
+  const ui = { tab: 6, selected: 'api' }
+  const next = transition(ui, key('j'), m, drawn.hits, 40, drawn.maxScroll).ui
+  assert.equal(next.decision, 10)
+  const older = transition(next, key('j'), m, drawn.hits, 40, drawn.maxScroll).ui
+  assert.equal(older.decision, 9)
+  assert.equal(transition(older, key('enter'), m, drawn.hits, 40, drawn.maxScroll).ui.auditOpen, true)
+  assert.match(plain(draw(m, { ...older, auditOpen: true }, 96, 40)).join('\n'), /Plan is narrow and reversible\.\n/)
+  // A click on a decision row selects it and the detail column follows.
+  const row = drawn.hits.find(hit => hit.target.kind === 'decision' && hit.target.seq === 10)
+  assert.ok(row)
+  assert.equal(transition(ui, { kind: 'click', row: row.row, col: 2 }, m, drawn.hits, 40, drawn.maxScroll).ui.decision, 10)
+  const picked = plain(draw(m, { ...ui, decision: 10 }, 96, 40)).join('\n')
+  assert.match(picked, /#10 result\.fidelity/)
+  assert.ok(picked.replace(/│/g, ' ').replace(/\s+/g, ' ').includes('PASS without done-when evidence'))
+  // The tab bar's sixth target and the footer's 1-6 hint.
+  assert.deepEqual(drawn.hits.filter(hit => hit.target.kind === 'tab').map(hit => hit.target.tab), [1, 2, 3, 4, 5, 6])
+  assert.match(lines[39], /1-6 tabs/)
+  assert.match(lines[39], /decision/)
+})
+
+test('AUDIT: missing, disabled and broken-chain states explain themselves; narrow pages stay inside their width', () => {
+  const none = plain(draw(model(APPROVED, BUILDING), { tab: 6, selected: 'api' }, 96, 40)).join('\n')
+  const flattened = none.replace(/\s+/g, ' ')
+  assert.match(flattened, /Audit is not recorded for this case\./)
+  assert.match(flattened, /Add an audit: block to the plan \(mode: shadow or enforce, provider: heuristic or typesafe\), then run attest stage audit\./)
+  const disabled = plain(draw(auditModel({ ...AUDIT, enabled: false, mode: 'off', provider: 'off', decisions: [] }), { tab: 6, selected: 'api' }, 96, 40)).join('\n')
+  assert.match(disabled, /mode off · provider off/)
+  assert.match(disabled, /Audit is disabled for this case/)
+  assert.match(disabled, /Set provider to heuristic or typesafe/)
+  const broken = plain(draw(auditModel({ ...AUDIT, chain: { ok: false, length: 7, brokenAt: 4 } }), { tab: 6, selected: 'api' }, 96, 40)).join('\n')
+  assert.match(broken, /✕ chain broken at record 4/)
+  const torn = plain(draw(auditModel({ ...AUDIT, chain: { ok: true, length: 9, incomplete: true, reason: 'the last line is incomplete' } }), { tab: 6, selected: 'api' }, 96, 40)).join('\n')
+  assert.match(torn, /◐ chain incomplete · 9 records/)
+  assert.match(torn, /the last line is incomplete/)
+  const empty = plain(draw(auditModel({ ...AUDIT, decisions: [], calibration: undefined }), { tab: 6, selected: 'api' }, 96, 40)).join('\n')
+  assert.match(empty, /no decisions yet/)
+  assert.match(empty, /no calibration yet/)
+  for (const width of [40, 56, 80, 84, 96, 120]) for (const tab of [1, 2, 3, 4, 5, 6]) {
+    const lines = plain(draw(auditModel(), { tab, selected: 'api' }, width, 24))
+    assert.ok(lines.every(line => widthOf(line) <= width), `${width} cols, tab ${tab}: ${lines.find(line => widthOf(line) > width)}`)
+  }
+  // The minimum 40x10 panel still shows the ledger head rather than looking broken.
+  assert.match(plain(draw(auditModel(), { tab: 6, selected: 'api' }, 40, 10)).join('\n'), /LEDGER/)
+  // Chinese: the tab reads 审计, the ledger words are translated, every line fits.
+  setLang('zh')
+  try {
+    const zh = plain(draw(auditModel(), { tab: 6, selected: 'api' }, 96, 40))
+    assert.match(zh[1], /6 审计$/)
+    assert.match(zh.join('\n'), /链已验证/)
+    assert.match(zh.join('\n'), /模式 影子 · 提供方 heuristic/)
+    assert.match(zh.join('\n'), /风险 高/)
+    assert.match(zh.join('\n'), /状态摘要/)
+    assert.ok(zh.every(line => widthOf(line) <= 96))
+  } finally {
+    setLang('en')
+  }
 })
 
 test('PLAN: done-when boxes tick at the reviewer\'s PASS once every branch it reviews is done; the contents column jumps to a section', () => {

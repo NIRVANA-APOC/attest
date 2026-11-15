@@ -2,7 +2,8 @@
 # moves the stage (`attest stage <id>`) and opens gates (`attest gate <id>
 # "<question>"`). `gate: plan` is the plan gate: every workflow has it, first,
 # because dispatch waits for it. A stage whose id is a role group (build,
-# review) shows how many of that group's roles are done.
+# review, audit) shows how many roles in that group are done; the audit stage
+# counts roles with `group: audit`, such as an optional auditor.
 stages:
   - id: plan
     label: Plan
@@ -13,6 +14,8 @@ stages:
     label: Build
   - id: review
     label: Review
+  - id: audit
+    label: Audit
   - id: mr-ok
     label: "MR OK?"
     gate: mr-ok

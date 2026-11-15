@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 
+import pc from 'picocolors'
+
 import { check } from './check.ts'
 import { langOf, WRITE_CHINESE } from './i18n.ts'
 import { clean, mux, NAME, Refusal, repository, runtime, Usage, workflowStages } from './command-context.ts'
@@ -17,10 +19,15 @@ import { panel } from './panel.ts'
 import { recordOrchestrator } from './notices.ts'
 import { afterApproval, markOrchestrator } from './orchestrator.ts'
 import { createPanel, openPanel } from './panel-open.ts'
+import {
+  auditLine, blocksInEnforce, loadAuditConfig, needsPersonInEnforce, recordMergeAudit, recordPlanAudit,
+  recordResultAudit, recordRoleAudit, recordTeardownAudit, runAudit,
+} from './jev/hooks.ts'
+import type { JevConfig } from './jev/types.ts'
 
 const OPTIONS: Record<string, string[]> = {
   setup: ['remove'], open: ['planning'], up: ['orch'], case: ['base'], check: [], approve: [], gate: ['no-wait'], stage: [],
-  dispatch: [], status: ['json', 'watch'], send: [], wait: ['role', 'gate', 'timeout', 'ready'], teardown: ['force'], close: ['all'], panel: ['once', 'plain', 'width', 'height', 'no-anim'],
+  dispatch: [], status: ['json', 'watch'], send: [], wait: ['role', 'gate', 'timeout', 'ready'], teardown: ['force'], close: ['all'], panel: ['once', 'plain', 'width', 'height', 'no-anim'], audit: ['json', 'write', 'note'],
 }
 
 const parsed = (command: string, args: string[]) => {
@@ -34,6 +41,7 @@ const parsed = (command: string, args: string[]) => {
       planning: { type: 'boolean' }, base: { type: 'string' },
       role: { type: 'string' }, gate: { type: 'string' }, timeout: { type: 'string' }, all: { type: 'boolean' },
       once: { type: 'boolean' }, plain: { type: 'boolean' }, 'no-anim': { type: 'boolean' }, width: { type: 'string' }, height: { type: 'string' },
+      write: { type: 'boolean' }, note: { type: 'string' },
     } })
   } catch (error) {
     throw new Usage((error as Error).message)
@@ -51,6 +59,44 @@ const id = (value: string | undefined, what: string): string => {
   if (value === undefined || !NAME.test(value)) throw new Usage(`${what} must be a name of letters, digits, - or _`)
 
   return value
+}
+
+/** The case's Jev configuration: its plan block, overridden by the environment. */
+const auditConfig = (r: Runtime, m: Case): JevConfig => loadAuditConfig(m.plan.audit, r.env)
+
+/** Colour only a real terminal: tests and pipes see byte-identical plain text. */
+const paint = (r: Runtime, style: (text: string) => string, text: string): string => (r.outputTTY && process.stdout.isTTY ? style(text) : text)
+
+/** A pending-person decision stops the action in enforce mode; shadow only records. */
+const audited = (outcome: Awaited<ReturnType<typeof recordPlanAudit>>, config: JevConfig, what: string): void => {
+  if (needsPersonInEnforce(outcome, config.mode)) throw new Refusal(`${what}: ${auditLine(outcome)}`)
+}
+
+/** What teardown would discard, read before the command removes anything. */
+const teardownState = (r: Runtime, m: Case): { dirty: string[]; untracked: string[]; unmerged: number; unpushed: boolean } => {
+  const dirty: string[] = []
+  const untracked: string[] = []
+  const trees = [m.worktree, ...[...m.folded.roles.values()].map(role => role.worktree)].filter(worktree => existsSync(worktree))
+  for (const worktree of trees) {
+    const status = r.run('git', ['status', '--porcelain'], { cwd: worktree })
+    if (status.code !== 0) continue
+    for (const line of status.out.split('\n')) {
+      if (line.trim() === '') continue
+      if (line.startsWith('?? ')) untracked.push(`${worktree}: ${line.slice(3)}`)
+      else dirty.push(`${worktree}: ${line.slice(3)}`)
+    }
+  }
+  const base = m.plan.base || `case/${m.name}`
+  const ahead = r.run('git', ['rev-list', '--count', `${base}..HEAD`], { cwd: m.worktree })
+  const unmerged = ahead.code === 0 ? Number(ahead.out.trim()) || 0 : 0
+  const upstream = r.run('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { cwd: m.worktree })
+  let unpushed = false
+  if (upstream.code === 0 && upstream.out.trim() !== '') {
+    const count = r.run('git', ['rev-list', '--count', '@{u}..HEAD'], { cwd: m.worktree })
+    unpushed = count.code === 0 && (Number(count.out.trim()) || 0) > 0
+  }
+
+  return { dirty, untracked, unmerged, unpushed }
 }
 
 const approve = async (r: Runtime, m: Case): Promise<Reply> => {
@@ -81,7 +127,15 @@ const wait = async (r: Runtime, m: Case, target: { role?: string; gate?: string;
       const opened = folded.roles.get(target.role ?? '')
       if (opened === undefined) throw new Refusal(`role ${target.role}: not dispatched`)
       const result = target.ready ? undefined : readResult(opened.worktree)
-      if (!target.ready && result?.status) return { code: result.status === 'done' ? 0 : 1, out: `${result.status}: ${result.summary}\n` }
+      if (!target.ready && result?.status) {
+        const role = statusOf(r, m).roles.find(one => one.name === target.role)
+        const config = auditConfig(r, m)
+        const outcome = await recordResultAudit(m.common, m.name, target.role ?? '', { status: result.status, summary: result.summary, body: result.body }, {
+          commits: role?.commits.length ?? 0, files: role?.changed.length ?? 0, outside: role?.outside ?? [],
+        }, config)
+        if (needsPersonInEnforce(outcome, config.mode)) return { code: 1, out: `${result.status}: ${result.summary}\n${auditLine(outcome)}\n` }
+        return { code: result.status === 'done' ? 0 : 1, out: `${result.status}: ${result.summary}\n` }
+      }
       const pane = ownedPane(r, opened)
       if (opened.closed || !pane.alive || pane.dead) return { code: 1, out: `${target.role}: pane gone without a result\n` }
       if (target.ready) {
@@ -98,13 +152,49 @@ const wait = async (r: Runtime, m: Case, target: { role?: string; gate?: string;
   }
 }
 
-const stage = (r: Runtime, m: Case, name: string): Reply => {
+const stage = async (r: Runtime, m: Case, name: string): Promise<Reply> => {
   const read = workflowStages(r, m.plan.workflow)
   if (read.problems.length > 0) throw new Refusal(read.problems.join('\n'))
   if (!read.stages.some(stage => stage.id === name)) throw new Refusal(`unknown stage ${name}; choose ${read.stages.map(stage => stage.id).join(', ')}`)
+  // The audit stage is a check, not just a marker: verify the chain, decide on
+  // every finished role's result, and write the report before the stage moves.
+  // A broken chain or an enforce-mode block leaves the stage where it was.
+  if (name === 'audit') return auditStage(r, m)
   append(m.log, 'cli', { ev: 'stage', stage: name })
 
   return { code: 0, out: `Stage: ${name}\n` }
+}
+
+/** Runs the workflow's audit stage: chain verify, one fidelity decision per result, then the report. */
+const auditStage = async (r: Runtime, m: Case): Promise<Reply> => {
+  const config = auditConfig(r, m)
+  const verify = await runAudit(r, m, { action: 'verify', planAudit: m.plan.audit })
+  if (verify.code !== 0) return verify
+  const lines: string[] = []
+  const view = statusOf(r, m)
+  for (const role of m.plan.roles) {
+    const opened = m.folded.roles.get(role.name)
+    if (opened === undefined) continue
+    const result = readResult(opened.worktree)
+    if (result?.status === undefined) continue
+    const one = view.roles.find(entry => entry.name === role.name)
+    const outcome = await recordResultAudit(m.common, m.name, role.name, { status: result.status, summary: result.summary, body: result.body }, {
+      commits: one?.commits.length ?? 0, files: one?.changed.length ?? 0, outside: one?.outside ?? [],
+    }, config)
+    if (needsPersonInEnforce(outcome, config.mode)) return { code: 1, out: `${lines.join('')}${auditLine(outcome)}\n` }
+    lines.push(`${auditLine(outcome)}\n`)
+  }
+  const report = await runAudit(r, m, { action: 'report', write: true, json: true, planAudit: m.plan.audit })
+  if (report.code !== 0) return report
+  let written = ''
+  try {
+    const data = JSON.parse(report.out) as { written?: string; counts?: { allow?: number; ask?: number; block?: number; shadow?: number }; risk?: string }
+    const counts = data.counts ?? {}
+    written = `Audit report: ${data.written ?? 'written'} · risk ${data.risk ?? 'unknown'} · allow ${counts.allow ?? 0} · ask ${counts.ask ?? 0} · block ${counts.block ?? 0} · shadow ${counts.shadow ?? 0}\n`
+  } catch { written = 'Audit report written.\n' }
+  append(m.log, 'cli', { ev: 'stage', stage: 'audit' })
+
+  return { code: 0, out: `Stage: audit\n${verify.out}${lines.join('')}${written}` }
 }
 
 const listing = (r: Runtime, json: boolean): string => {
@@ -129,7 +219,14 @@ const status = async (r: Runtime, want: string, json: boolean, watch: boolean): 
         code = view.problems.length > 0 ? 1 : 0
         out = json ? `${JSON.stringify(view)}\n` : [
           `${view.case} · stage ${view.stage || '—'}`,
-          ...view.roles.map(role => `${role.name}: ${role.state} · ${role.agent} · ${role.branch || '—'} · ${role.commits.length} commits · changed ${role.changed.join(', ') || '—'} · outside ${role.outside.join(', ') || '—'}${role.summary ? ` · ${role.summary}` : ''}${role.problem ? ` · ${role.problem}` : ''}`),
+          ...view.roles.map(role => {
+            const state = role.state === 'done' ? paint(r, pc.green, role.state)
+              : role.state === 'working' ? paint(r, pc.cyan, role.state)
+                : role.state === 'waits' || role.state === 'blocked' || role.state === 'failed' ? paint(r, pc.red, role.state)
+                  : paint(r, pc.dim, role.state)
+
+            return `${role.name}: ${state} · ${role.agent} · ${role.branch || '—'} · ${role.commits.length} commits · changed ${role.changed.join(', ') || '—'} · outside ${role.outside.join(', ') || '—'}${role.summary ? ` · ${role.summary}` : ''}${role.problem ? ` · ${role.problem}` : ''}`
+          }),
           ...view.gates.map(gate => `Gate ${gate.id}: ${gate.ask || 'needs you'}`),
           ...view.problems,
         ].join('\n') + '\n'
@@ -262,12 +359,44 @@ export const execute = async (command: string, args: string[], overrides: Partia
     }
     const m = caseOf(r, want)
     recordOrchestrator(r, m, m.name)
-    if (command === 'teardown') return await teardown(r, m, !!values.force)
+    if (command === 'audit') {
+      if (pos.length === 0) throw new Usage('audit verify|report|show|outcome|calibrate')
+      return await runAudit(r, m, { action: pos[0] ?? '', args: pos.slice(1), json: !!values.json, write: !!values.write, ...(values.note === undefined ? {} : { note: values.note }), planAudit: m.plan.audit })
+    }
+    if (command === 'teardown') {
+      const config = auditConfig(r, m)
+      audited(await recordTeardownAudit(m.common, m.name, teardownState(r, m), config), config, 'teardown')
+      return await teardown(r, m, !!values.force)
+    }
     if (command === 'approve') return await approve(r, m)
-    if (command === 'dispatch') return await dispatch(r, m, id(pos[0], 'role'))
-    if (command === 'stage') return stage(r, m, id(pos[0], 'stage'))
+    if (command === 'dispatch') {
+      const name = id(pos[0], 'role')
+      const role = m.plan.roles.find(one => one.name === name)
+      if (role !== undefined) {
+        const config = auditConfig(r, m)
+        audited(await recordRoleAudit(m.common, m.name, { name, agent: role.agent, touches: role.touches, goal: role.goal, text: role.section, dependsOn: role.dependsOn, planGoal: m.plan.goal }, config), config, `role ${name}`)
+      }
+      return await dispatch(r, m, name)
+    }
+    if (command === 'stage') return await stage(r, m, id(pos[0], 'stage'))
     if (command === 'gate') {
       const gate = id(pos[0], 'gate')
+      const config = auditConfig(r, m)
+      // A gate already asks the person, so enforce mode only refuses when the
+      // decision is a block; medium asks the person through the gate itself.
+      if (gate === PLAN_GATE) {
+        const outcome = await recordPlanAudit(m.common, m.name, m.source, m.plan, config)
+        if (blocksInEnforce(outcome, config.mode)) throw new Refusal(`plan gate: ${auditLine(outcome)}`)
+      }
+      else if (gate === 'mr-ok') {
+        const view = statusOf(r, m)
+        const results = view.roles.map(role => ({ role: role.name, status: role.state }))
+        const reviews = view.roles.filter(role => role.summary !== '').map(role => `${role.name}: ${role.summary}`)
+        const files = view.roles.reduce((sum, role) => sum + role.changed.length, 0)
+        const commits = view.roles.reduce((sum, role) => sum + role.commits.length, 0)
+        const outcome = await recordMergeAudit(m.common, m.name, { results, reviews, files, commits }, config)
+        if (blocksInEnforce(outcome, config.mode)) throw new Refusal(`mr-ok gate: ${auditLine(outcome)}`)
+      }
       append(m.log, 'cli', { ev: 'gate-open', gate, ...(pos[1] === undefined ? {} : { ask: pos[1] }), ...(gate === PLAN_GATE ? { plan: m.hash } : {}) })
       return values['no-wait'] ? { code: 0, out: `Opened gate ${gate}\n` } : await wait(r, m, { gate })
     }
@@ -280,6 +409,7 @@ export const execute = async (command: string, args: string[], overrides: Partia
     if (command === 'wait') return await wait(r, m, { ...(values.role === undefined ? { gate: id(values.gate, 'gate') } : { role: id(values.role, 'role'), ready: !!values.ready }), ...(values.timeout === undefined ? {} : { seconds: Number(values.timeout) }) })
     throw new Usage(`unknown command '${command}'`)
   } catch (error) {
-    return { code: error instanceof Usage ? 2 : 1, out: `${(error as Error).message}\n` }
+    const usage = error instanceof Usage
+    return { code: usage ? 2 : 1, out: `${paint(r, usage ? pc.yellow : pc.red, (error as Error).message)}\n` }
   }
 }

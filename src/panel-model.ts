@@ -4,6 +4,8 @@ import { mux, workflowStages } from './command-context.ts'
 import type { Case, Runtime } from './command-context.ts'
 import { modelOf } from './model.ts'
 import type { PanelModel } from './model.ts'
+import { auditViewOf } from './jev/view.ts'
+import type { AuditView } from './jev/types.ts'
 import { PLAN_GATE } from './log.ts'
 import { caseOf, Unresolved } from './cases.ts'
 import { liveOf } from './role-commands.ts'
@@ -32,6 +34,15 @@ const planning = (r: Runtime, root: string, finish = false): { since?: number } 
   return mark === '1' ? {} : { since: Number(mark) }
 }
 
+/** The audit ledger as the Jev view projects it; a ledger that cannot be read leaves the page empty, never the panel. */
+const auditOf = (common: string, name: string): AuditView | undefined => {
+  try {
+    return auditViewOf(common, name)
+  } catch {
+    return undefined
+  }
+}
+
 /** The commands and panel share the same bytes, hash, stages and live reads. */
 export const readPanel = (r: Runtime, want: string): Reading => {
   try {
@@ -42,11 +53,14 @@ export const readPanel = (r: Runtime, want: string): Reading => {
     const since = marked?.since ?? Date.parse(m.events.find(e => e.ev === 'up')?.at ?? '')
     const stages = workflowStages(r, m.plan.workflow)
     const plan = { ...m.plan, problems: [...m.problems, ...stages.problems] }
+    // A corrupt or unreadable ledger only costs the AUDIT page, never the rest of the panel.
+    const audit = auditOf(m.common, m.name)
     const model = modelOf({
       case: m.name, planPath: relative(m.worktree, m.path), planText: m.source, plan,
       agents: m.agents, hash: m.hash, folded: m.folded, log: m.events, stages: stages.stages,
       live: new Map(m.plan.roles.map(role => [role.name, liveOf(r, m, role)])), now: new Date(r.now()),
       ...(isDrafting && { drafting: Number.isFinite(since) ? { since } : {} }),
+      ...(audit !== undefined && { audit }),
     })
 
     return { case: m, model }

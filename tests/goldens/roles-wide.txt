@@ -1,5 +1,5 @@
  attest  auth-refresh  ·  Build                                                                                       ◆ 1 needs you  ·  12:07   中/EN
-  1 CASE   2 ROLES   3 PLAN   4 LOG   5 DIFF
+  1 CASE   2 ROLES   3 PLAN   4 LOG   5 DIFF   6 AUDIT
                                                                                       Refresh tokens rotate on every use, and a reused one is refused
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ▌ ◆ panel  waits on you · Trust this folder?                                                                                            o Open window
@@ -57,4 +57,4 @@
 
 
 
- ↑↓ role   ⏎ detail   o open window   s send                                                                                        1-5 tabs   ? help
+ ↑↓ role   ⏎ detail   o open window   s send                                                                                        1-6 tabs   ? help

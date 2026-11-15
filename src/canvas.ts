@@ -1,6 +1,7 @@
 // A character canvas: the panel draws every part as cells of text, then reads
 // them back as lines of styled runs, painted as ANSI or kept plain for the
 // goldens.
+import stringWidth from 'string-width'
 
 /** The panel's theme, `dim` lighter so waiting items read. */
 export const TONES = {
@@ -48,18 +49,14 @@ const sameStyle = (a: Style, b: Style) => STYLE.every(key => a[key] === b[key])
 
 export const textOf = (line: Line) => line.map(run => run.text).join('')
 
-const WIDE: [number, number][] = [
-  [0x1100, 0x115f], [0x2e80, 0x303e], [0x3040, 0xa4cf], [0xac00, 0xd7a3], [0xf900, 0xfaff], [0xfe10, 0xfe19],
-  [0xfe30, 0xfe6f], [0xff00, 0xff60], [0xffe0, 0xffe6], [0x1f300, 0x1f64f], [0x1f900, 0x1f9ff], [0x20000, 0x3fffd],
-]
-const ZERO: [number, number][] = [[0x300, 0x36f], [0x200b, 0x200d], [0x20d0, 0x20ff], [0xfe00, 0xfe0f]]
-const within = (code: number, ranges: [number, number][]) => ranges.some(([lo, hi]) => code >= lo && code <= hi)
+// The panel's own text glyphs are one cell wide, whatever their Unicode width
+// property: string-width counts text-presentation symbols (◼ ◻ ▶ ▪ ⏺) as emoji
+// wide because they are also emoji, while terminals draw them in one cell and
+// the panel's boxes, bars and goldens are laid out on that.
+const ONE_CELL = new Set(['◼', '◻', '▶', '▪', '⏺'])
 
-const cellOf = (ch: string) => {
-  const code = ch.codePointAt(0) ?? 0
-
-  return within(code, ZERO) ? 0 : within(code, WIDE) ? 2 : 1
-}
+/** Cells one character takes: Unicode display width, zero for combining marks. */
+const cellOf = (ch: string) => (ONE_CELL.has(ch) ? 1 : stringWidth(ch))
 
 /** Display width of `text` in terminal cells. */
 export const cellsOf = (text: string) => [...text].reduce((sum, ch) => sum + cellOf(ch), 0)
@@ -140,6 +137,9 @@ export class Canvas {
     const line = this.cells[row]
     let at = col
     for (const ch of text) {
+      const code = ch.codePointAt(0) ?? 0
+      // Control characters take no cell and never attach to the one before.
+      if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) continue
       const size = cellOf(ch)
       if (line !== undefined && size === 0) {
         const prev = line[at - 1]

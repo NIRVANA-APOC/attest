@@ -20,6 +20,7 @@ const COMMANDS: [string, string][] = [
   ['wait', 'wait for a role result, readiness or a gate answer'],
   ['stage', 'set the case\'s current stage'],
   ['gate', 'ask the person a question in the panel'],
+  ['audit', 'verify, report or calibrate the Jev audit ledger'],
   ['teardown', 'remove case panes, role worktrees and branches'],
   ['close', 'close a role\'s window, or the case'],
 ]
@@ -40,6 +41,7 @@ const usage = () =>
     '  dispatch <role> · send <role> <text…> (or stdin)',
     '  status [--json] [--watch] · close <role> | --all',
     '  panel [--once] [--plain] [--no-anim] [--width N --height N]',
+    '  audit verify | report [--json] [--write] | show <n> | outcome <id> <verdict> | calibrate',
     '  wait (--role <r> [--ready] | --gate <id>) [--timeout <seconds>]',
     '  teardown [--force] (finished cases require -m)',
     '  -v, --version  print the version',

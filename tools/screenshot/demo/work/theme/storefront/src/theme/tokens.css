@@ -1,0 +1,21 @@
+:root {
+  color-scheme: light dark;
+
+  --surface: #ffffff;
+  --surface-raised: #f6f5f1;
+  --text: #1d2433;
+  --text-muted: #5c667a;
+  --border: #dcd9d1;
+  --accent: #2f5079;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #151821;
+    --surface-raised: #1d2230;
+    --text: #e8eaf0;
+    --text-muted: #9aa3ad;
+    --border: #2c3446;
+    --accent: #9ac2ff;
+  }
+}

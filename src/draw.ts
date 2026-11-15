@@ -5,6 +5,7 @@ import { pairsOf, wordDiff } from './diff.ts'
 import type { FileDiff } from './diff.ts'
 import { known, lang, plural, t } from './i18n.ts'
 import type { Phrase } from './i18n.ts'
+import type { AuditView } from './jev/types.ts'
 import { clockOf, durationOf } from './model.ts'
 import type { PanelModel, RoleView, StageMark } from './model.ts'
 import { clashesOf, sectionsOf, treeOf } from './plan.ts'
@@ -16,17 +17,19 @@ import type { RoleState } from './state.ts'
 // the selected role's detail with its live screen on the right; the key bar
 // last. Every clickable part is also a target, so a click finds what it hit.
 
-export const TABS = ['CASE', 'ROLES', 'PLAN', 'LOG', 'DIFF'] as const
+export const TABS = ['CASE', 'ROLES', 'PLAN', 'LOG', 'DIFF', 'AUDIT'] as const
 export type Ui = {
   tab: number; selected: string; input?: { label: string; text: string }; scroll?: number; message?: string; help?: boolean; full?: boolean
   /** LOG: the event under the cursor, the events opened to their fields, and how many there were when following stopped. */
   line?: number; open?: number[]; paused?: number
   /** DIFF: the file under the cursor, as `role\tpath`. */
   file?: string
+  /** AUDIT: the ledger seq under the cursor, and whether its detail is expanded. */
+  decision?: number; auditOpen?: boolean
 }
 /** `stay`: selecting the role keeps the tab. */
 export type Target = { kind: 'role'; name: string; stay?: true } | { kind: 'tab'; tab: number } | { kind: 'key'; key: string; role?: string }
-  | { kind: 'scroll'; to: number } | { kind: 'line'; index: number } | { kind: 'file'; key: string; role: string }
+  | { kind: 'scroll'; to: number } | { kind: 'line'; index: number } | { kind: 'file'; key: string; role: string } | { kind: 'decision'; seq: number }
 export type Hit = { row: number; col: number; width: number; height: number; target: Target }
 export type Point = [row: number, col: number]
 export type Rect = { row: number; col: number; width: number; height: number }
@@ -828,8 +831,8 @@ export const draw = (m: PanelModel, ui: Ui, width: number, height: number): Draw
   else if (ui.message) c.put(height - 2, 0, fit(` ${ui.message}`, width), { tone: 'accent' })
   if (ui.input !== undefined && ui.message) c.put(height - 3, 0, fit(` ${ui.message}`, width), { tone: 'accent' })
   const pairs: [string, Phrase][] = m.gate !== undefined
-    ? [['a', 'approve'], ['c', 'change'], ['v', 'plan'], ['↑↓', 'role'], ['1-5', 'tabs'], ['?', 'help']]
-    : [['↑↓', 'role'], ['⏎', 'detail'], ['o', 'open'], ['s', 'send'], ['d', 'diff'], ['1-5', 'tabs'], ['?', 'help']]
+    ? [['a', 'approve'], ['c', 'change'], ['v', 'plan'], ['↑↓', 'role'], ['1-6', 'tabs'], ['?', 'help']]
+    : [['↑↓', 'role'], ['⏎', 'detail'], ['o', 'open'], ['s', 'send'], ['d', 'diff'], ['1-6', 'tabs'], ['?', 'help']]
   if (ui.tab === 1) c.put(height - 1, 0, fit(` ${pairs.map(([key, what]) => `${key}  ${t(what)}`).join('   ')}`, width), { tone: 'dim' })
   else c.runs(height - 1, 0, hints(m, ui, width))
 
@@ -839,9 +842,10 @@ export const draw = (m: PanelModel, ui: Ui, width: number, height: number): Draw
   else if (row < bottom) ({ maxScroll, scroll, spin } = other(c, m, ui, row, bottom, hit, scene))
   if (ui.help) {
     const keys: [string, Phrase][] = [
-      ['↑↓ / j k', 'select role'], ['Enter', 'detail'], ['1-5 / Tab', 'tabs'], ['o', 'open role pane'], ['s', 'send to role'], ['d', 'diff'],
-      ['v', 'plan'], ['PgUp/PgDn', 'scroll'], ['LOG ⏎', 'open an event'], ['LOG G / End', 'follow the newest'], ['DIFF ↑↓ n N', 'next file'],
-      ['a', 'approve the gate'], ['c', 'type a change'], ['Enter / Esc', 'submit or cancel input'], ['L', 'switch language (中/EN)'], ['? / Esc', 'close help'], ['q / Ctrl-C', 'quit'],
+      ['↑↓ / j k', 'select role'], ['Enter', 'detail'], ['1-6 / Tab', 'tabs'], ['6', 'audit page'], ['o', 'open role pane'], ['s', 'send to role'],
+      ['d', 'diff'], ['v', 'plan'], ['PgUp/PgDn', 'scroll'], ['LOG ⏎', 'open an event'], ['LOG G / End', 'follow the newest'], ['DIFF ↑↓ n N', 'next file'],
+      ['AUDIT ↑↓', 'decision'], ['AUDIT ⏎', 'reason and digest'], ['a', 'approve the gate'], ['c', 'type a change'],
+      ['Enter / Esc', 'submit or cancel input'], ['L', 'switch language (中/EN)'], ['? / Esc', 'close help'], ['q / Ctrl-C', 'quit'],
     ]
     const w = Math.min(72, width - 4)
     // Two to a line when they fit, else one.
@@ -1406,13 +1410,238 @@ const diffPage = ({ c, m, ui, top, bottom, hit }: PageArgs): Paged => {
   return { maxScroll }
 }
 
+// ---- AUDIT ------------------------------------------------------------------
+
+/** Each band and action as a colour, so a risky decision stands out from a quiet one. */
+const BAND_TONE: Record<string, Tone> = { low: 'ok', medium: 'warn', high: 'error', unknown: 'dim' }
+const ACTION_TONE: Record<string, Tone> = { allow: 'ok', ask: 'warn', block: 'error', shadow: 'dim' }
+const RISK_TONE: Record<string, Tone> = { low: 'ok', medium: 'warn', high: 'error', unknown: 'dim' }
+
+type AuditRowView = NonNullable<PanelModel['audit']>['decisions'][number]
+/** The ledger's decisions newest first, whatever order the view keeps them in. */
+export const auditRows = (m: PanelModel): AuditRowView[] => [...(m.audit?.decisions ?? [])].sort((a, b) => b.seq - a.seq)
+/** The seq the cursor is on: the one asked for, else the newest decision. */
+export const auditSeqOf = (m: PanelModel, ui: Pick<Ui, 'decision'>): number | undefined =>
+  ui.decision !== undefined && (m.audit?.decisions ?? []).some(row => row.seq === ui.decision) ? ui.decision : auditRows(m)[0]?.seq
+/** The state digest for the detail column; the ledger records one per decision, older ledgers may not. */
+const digestOf = (row: AuditRowView): string | undefined => row.stateDigest
+const probabilityOf = (probability: number | undefined) => (probability === undefined ? '—' : probability.toFixed(2))
+/** `at` as HH:MM, or its own time text when it does not parse. */
+const timeOf = (at: string) => {
+  const date = new Date(at)
+
+  return Number.isNaN(date.getTime()) ? at.slice(11, 16) : clockOf(date)
+}
+
+const DECISION_ID = 15
+/** One decision row: its time, id, band, action and probability. */
+const decisionLine = (row: AuditRowView, selected: boolean): Line => [
+  { text: selected ? '▸' : ' ', tone: 'accent' },
+  { text: ' ' },
+  { text: fit(timeOf(row.at), 5), tone: 'dim' },
+  { text: '  ' },
+  { text: fit(row.id, DECISION_ID), tone: 'bright' },
+  { text: ' ' },
+  { text: fit(known(row.band), 7), tone: BAND_TONE[row.band] ?? 'dim' },
+  { text: ' ' },
+  { text: fit(known(row.action), 6), tone: ACTION_TONE[row.action] ?? 'dim' },
+  { text: probabilityOf(row.probability).padStart(5), tone: 'dim' },
+]
+
+/** allow / ask / block / shadow as four counts, two to a line when the column is narrow. */
+const countLines = (counts: AuditView['counts'], width: number): Line[] => {
+  const items: [Phrase, number, Tone][] = [['allow', counts.allow, 'ok'], ['ask', counts.ask, 'warn'], ['block', counts.block, 'error'], ['shadow', counts.shadow, 'dim']]
+  const line = (chosen: [Phrase, number, Tone][]): Line => [
+    { text: ' ' },
+    ...chosen.flatMap(([word, n, tone], index): Line => [...(index > 0 ? [{ text: '  ·  ', tone: 'dim' as const }] : []), { text: `${t(word)} ${n}`, tone }]),
+  ]
+  const all = line(items)
+
+  return cellsOf(textOf(all)) <= width ? [all] : [line(items.slice(0, 2)), line(items.slice(2))]
+}
+
+/** The ledger at a glance: chain state, mode and provider, the risk verdict, then the band counts. */
+const ledgerLines = (audit: AuditView, width: number): Line[] => {
+  const lines: Line[] = [sectionHead([{ text: t('LEDGER') }], width, 'accent', true)]
+  const chain = audit.chain
+  const size = plural(chain.length, '{0} record', '{0} records')
+  const last = audit.lastAt === undefined ? '' : ` · ${t('last {0}', timeOf(audit.lastAt))}`
+  const broken = chain.brokenAt === undefined ? t('chain broken') : t('chain broken at record {0}', chain.brokenAt)
+  // A torn last line is a warning, not tampering: it says the ledger is incomplete rather than broken.
+  const state = !chain.ok
+    ? { mark: '✕', text: broken, tone: 'error' as const }
+    : chain.incomplete ? { mark: '◐', text: t('chain incomplete'), tone: 'warn' as const } : { mark: '✓', text: t('chain verified'), tone: 'ok' as const }
+  lines.push([{ text: ` ${state.mark} `, tone: state.tone }, { text: state.text, tone: state.tone, bold: true }, { text: ` · ${size}${last}`, tone: 'dim' }])
+  if (chain.reason !== undefined && chain.reason !== '') {
+    for (const one of wrap(chain.reason, Math.max(8, width - 2)).slice(0, 2)) lines.push([{ text: ` ${one}`, tone: 'dim' }])
+  }
+  lines.push([
+    { text: ' ' }, { text: t('mode {0}', known(audit.mode)), tone: audit.mode === 'enforce' ? 'warn' : 'dim' },
+    { text: ' · ', tone: 'dim' }, { text: t('provider {0}', audit.provider), tone: 'dim' },
+  ])
+  const risk = RISK_TONE[audit.risk] ?? 'dim'
+  const head: Line = [{ text: ' ' }, { text: '◆ ', tone: risk }, { text: t('risk {0}', known(audit.risk)), tone: risk, bold: true }]
+  const one = audit.verdict === '' ? '' : ` · ${audit.verdict}`
+  if (cellsOf(textOf(head)) + cellsOf(one) <= width) lines.push([...head, ...(one === '' ? [] : [{ text: one, tone: 'dim' as const }])])
+  else {
+    // The verdict is the page's answer in a sentence: it wraps rather than losing its end.
+    lines.push(head)
+    for (const part of wrap(audit.verdict, Math.max(8, width - 2)).slice(0, 2)) lines.push([{ text: `  ${part}`, tone: 'dim' }])
+  }
+  lines.push([], sectionHead([{ text: t('BANDS') }], width, 'accent', true), ...countLines(audit.counts, width))
+
+  return lines
+}
+
+/** The selected decision's reason and state digest, beside the list or below it when narrow. */
+const detailLines = (m: PanelModel, ui: Ui, width: number): Line[] => {
+  const lines: Line[] = [sectionHead([{ text: t('DECISION') }], width, 'accent', true)]
+  const row = auditRows(m).find(one => one.seq === auditSeqOf(m, ui))
+  if (row === undefined) {
+    lines.push([], ...wrap(t('select a decision'), Math.max(8, width - 2)).map((one): Line => [{ text: ` ${one}`, tone: 'dim' }]))
+
+    return lines
+  }
+  const band = BAND_TONE[row.band] ?? 'dim'
+  const tag = ` #${row.seq} `
+  lines.push([{ text: tag, tone: 'dim' }, { text: fit(row.id, Math.max(0, width - cellsOf(tag))), tone: 'bright', bold: true }])
+  lines.push([{ text: ` ${known(row.band)} · ${known(row.action)} · p ${probabilityOf(row.probability)}`, tone: band }])
+  lines.push([{ text: ` ${row.provider} · ${timeOf(row.at)}`, tone: 'dim' }])
+  lines.push([], [{ text: ` ${t('reason')}`, tone: 'dim' }])
+  const inner = Math.max(8, width - 3)
+  const reason = wrap(row.reason === '' ? '—' : row.reason, inner)
+  const shown = ui.auditOpen ? reason : reason.slice(0, 3)
+  for (const one of shown) lines.push([{ text: '  ' }, { text: fit(one, inner), tone: 'bright' }])
+  if (!ui.auditOpen && reason.length > shown.length) lines.push([{ text: `  ${plural(reason.length - shown.length, '{0} more line', '{0} more lines')}`, tone: 'dim' }])
+  const digest = digestOf(row)
+  lines.push([], [{ text: ` ${t('state digest')}`, tone: 'dim' }])
+  if (digest === undefined) {
+    lines.push([{ text: `  ${t('not recorded')}`, tone: 'dim' }])
+
+    return lines
+  }
+  const room = Math.max(8, width - 4)
+  // Opened, the whole digest is shown, wrapped when the column is too narrow for one line.
+  if (ui.auditOpen && digest.length > room) {
+    for (const part of wrap(digest, room)) lines.push([{ text: `  ${part}`, tone: 'accent' }])
+  } else {
+    lines.push([{ text: `  ${digest.length <= room ? digest : `${digest.slice(0, room - 1)}…`}`, tone: 'accent' }])
+  }
+
+  return lines
+}
+
+/** How well the recorded probabilities matched outcomes: the Brier score and a bar per reliability bin. */
+const calibrationLines = (calibration: AuditView['calibration'], width: number): Line[] => {
+  const lines: Line[] = [sectionHead([{ text: t('CALIBRATION') }], width, 'accent', true)]
+  if (calibration === undefined) {
+    lines.push([{ text: ` ${t('no calibration yet')}`, tone: 'dim' }])
+    lines.push(...wrap(t('record outcomes with attest audit outcome'), Math.max(8, width - 2)).map((one): Line => [{ text: ` ${one}`, tone: 'dim' }]))
+
+    return lines
+  }
+  const brier = Number.isFinite(calibration.brier) ? calibration.brier : NaN
+  const tone: Tone = !Number.isFinite(brier) ? 'dim' : brier <= 0.15 ? 'ok' : brier <= 0.3 ? 'warn' : 'error'
+  lines.push([
+    { text: ' ' }, { text: `Brier ${Number.isFinite(brier) ? brier.toFixed(2) : '—'}`, tone, bold: true },
+    { text: ` · ${plural(calibration.n, '{0} outcome', '{0} outcomes')}`, tone: 'dim' },
+  ])
+  const cells = Math.max(4, Math.min(10, width - 16))
+  for (const bin of calibration.bins) {
+    const observed = Math.max(0, Math.min(1, bin.observed))
+    const filled = Math.round(observed * cells)
+    const mid = (bin.lo + bin.hi) / 2
+    const binTone: Tone = Math.abs(observed - mid) <= 0.15 ? 'ok' : 'warn'
+    lines.push([
+      { text: ` ${bin.lo.toFixed(1)}-${bin.hi.toFixed(1)} `, tone: 'dim' },
+      { text: '█'.repeat(filled), tone: binTone }, { text: '░'.repeat(cells - filled), tone: 'chrome', fade: 0.5 },
+      { text: ` ${bin.n}`, tone: 'dim' },
+    ])
+  }
+
+  return lines
+}
+
+/** No ledger at all: say how audit is turned on rather than looking broken. */
+const explainLines = (width: number): Line[] => {
+  const lines: Line[] = [sectionHead([{ text: t('AUDIT') }], width, 'accent', true), []]
+  const say = (phrase: Phrase, tone: Tone) => {
+    for (const one of wrap(t(phrase), Math.max(8, width - 2))) lines.push([{ text: ` ${one}`, tone }])
+  }
+  say('Audit is not recorded for this case.', 'bright')
+  lines.push([])
+  say('Add an audit: block to the plan (mode: shadow or enforce, provider: heuristic or typesafe), then run attest stage audit.', 'dim')
+  say("Decisions land in this case's audit ledger as it runs.", 'dim')
+
+  return lines
+}
+
+/** The plan turns audit off: keep the ledger summary, then say what to change. */
+const offLines = (audit: AuditView, width: number): Line[] => {
+  const lines = [...ledgerLines(audit, width), [], ...wrap(t('Audit is disabled for this case: the plan sets audit.provider to off.'), Math.max(8, width - 2)).map((one): Line => [{ text: ` ${one}`, tone: 'bright' }])]
+  lines.push(...wrap(t('Set provider to heuristic or typesafe in the plan to record decisions again.'), Math.max(8, width - 2)).map((one): Line => [{ text: ` ${one}`, tone: 'dim' }]))
+
+  return lines
+}
+
+/** AUDIT: the ledger, its band counts and every decision on the left; the selected decision's reason and digest, then the calibration, on the right (below when narrow). */
+const auditPage = ({ c, m, ui, top, bottom, hit }: PageArgs): Paged => {
+  const width = c.width - 2
+  const room = Math.max(0, bottom - top)
+  const audit = m.audit
+  const two = c.width >= 84
+  const leftWidth = two ? Math.max(40, Math.min(58, Math.round(width * 0.55))) : width
+  const rightWidth = Math.max(12, width - leftWidth - 2)
+  const render = (rows: Line[], marks: (number | undefined)[]): Paged => {
+    const maxScroll = Math.max(0, rows.length - room)
+    const from = clampScroll(ui.scroll, maxScroll)
+    rows.slice(from, from + room).forEach((line, index) => c.runs(top + index, 1, fitRuns(line, width)))
+    marks.forEach((seq, index) => {
+      if (seq !== undefined && index >= from && index < from + room) hit(top + index - from, 1, Math.min(leftWidth, width), 1, { kind: 'decision', seq })
+    })
+
+    return { maxScroll }
+  }
+
+  if (audit === undefined) return render(explainLines(width), [])
+  if (!audit.enabled || audit.mode === 'off') return render(offLines(audit, width), [])
+
+  const left: Line[] = []
+  const marks: (number | undefined)[] = []
+  const push = (line: Line, seq?: number) => { left.push(line); marks.push(seq) }
+  const pushAll = (lines: Line[]) => { for (const line of lines) push(line) }
+  pushAll(ledgerLines(audit, leftWidth))
+  push([])
+  push(sectionHead([{ text: t('DECISIONS') }], leftWidth, 'accent', true))
+  const decisions = auditRows(m)
+  const selected = auditSeqOf(m, ui)
+  if (decisions.length === 0) {
+    pushAll(wrap(t('no decisions yet'), Math.max(8, leftWidth - 2)).map((one): Line => [{ text: ` ${one}`, tone: 'dim' }]))
+    pushAll(wrap(t('the ledger fills as the case runs'), Math.max(8, leftWidth - 2)).map((one): Line => [{ text: ` ${one}`, tone: 'dim' }]))
+  } else {
+    for (const row of decisions) push(decisionLine(row, row.seq === selected), row.seq)
+  }
+
+  const side = [...detailLines(m, ui, two ? rightWidth : width), [], ...calibrationLines(audit.calibration, two ? rightWidth : width)]
+  if (two) {
+    const rows = Array.from({ length: Math.max(left.length, side.length) }, (_, index) => [
+      ...fitRuns(left[index] ?? [], leftWidth), { text: '│', tone: 'chrome' as const }, { text: ' ' }, ...fitRuns(side[index] ?? [], rightWidth),
+    ])
+
+    return render(rows, marks)
+  }
+  const rows = [...left, [], ...side]
+
+  return render(rows, [...marks, undefined, ...side.map(() => undefined)])
+}
+
 /** The pages other than CASE use the whole width. */
 const other = (c: Canvas, m: PanelModel, ui: Ui, top: number, bottom: number, hit: HitFn, scene: Scene): Paged => {
   const page: Page = { spins: [], shimmers: [], breathes: [], sparks: [], events: [] }
   scene.page = page
   const args = { c, m, ui, top, bottom, hit, page }
 
-  return ui.tab === 2 ? rolesPage(args) : ui.tab === 3 ? planPage(args) : ui.tab === 4 ? logPage(args) : diffPage(args)
+  return ui.tab === 2 ? rolesPage(args) : ui.tab === 3 ? planPage(args) : ui.tab === 4 ? logPage(args) : ui.tab === 5 ? diffPage(args) : auditPage(args)
 }
 
 /** Key hints for each page, keys bright and what they do dim; an open gate's keys first. */
@@ -1421,11 +1650,12 @@ const HINTS: Record<number, [string, Phrase][]> = {
   3: [['↑↓', 'scroll'], ['f', 'full text']],
   4: [['↑↓', 'line'], ['⏎', 'expand'], ['G', 'follow']],
   5: [['↑↓', 'file'], ['PgUp PgDn', 'scroll'], ['o', 'open window']],
+  6: [['↑↓', 'decision'], ['⏎', 'reason and digest'], ['PgUp PgDn', 'scroll']],
 }
 const hints = (m: PanelModel, ui: Ui, width: number): Line => {
   const keys = [...(m.gate === undefined ? [] : [['a', 'approve'], ['c', 'change']] as [string, Phrase][]), ...(ui.tab === 3 && m.drafting !== undefined ? [] : HINTS[ui.tab] ?? []).map(([key, what]): [string, Phrase] => (key === 'f' && ui.full ? [key, 'summary'] : [key, what]))]
   const left: Line = [{ text: ' ' }, ...keys.flatMap(([key, what]): Line => [{ text: key, tone: 'accentBright', bold: true }, { text: ` ${t(what)}   `, tone: 'dim' }])]
-  const right: Line = [{ text: '1-5', tone: 'accentBright', bold: true }, { text: ` ${t('tabs')}   `, tone: 'dim' }, { text: '?', tone: 'accentBright', bold: true }, { text: ` ${t('help')} `, tone: 'dim' }]
+  const right: Line = [{ text: '1-6', tone: 'accentBright', bold: true }, { text: ` ${t('tabs')}   `, tone: 'dim' }, { text: '?', tone: 'accentBright', bold: true }, { text: ` ${t('help')} `, tone: 'dim' }]
   const room = width - cellsOf(textOf(right))
 
   return cellsOf(textOf(left)) <= room ? [...fitRuns(left, room), ...right] : fitRuns(left, width)

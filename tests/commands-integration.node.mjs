@@ -15,6 +15,7 @@ import { readPanel } from '../dist/panel-model.js'
 import { gateTarget } from '../dist/panel-input.js'
 import { flushAnswers } from '../dist/orchestrator.js'
 import { shellOf, tmux } from '../dist/run.js'
+import { appendDecision, appendOutcome, ledgerPath } from '../dist/jev/ledger.js'
 import { gitDirsOf } from '../dist/role-commands.js'
 
 test('real scratch tmux: open marks one panel, keeps focus, and is a no-op the second time', { skip: spawnSync('tmux', ['-V']).status !== 0, timeout: 15000 }, async t => {
@@ -551,4 +552,466 @@ test('real scratch tmux: the same case name in two repositories stays apart', { 
   assert.deepEqual(across.cases.map(m => [m.name, m.orchestrator]), [['alpha', b.pane], ['beta', '']])
   const panels = w.panes().filter(p => p.panel !== '' && p.orchestrator !== q.pane)
   assert.deepEqual(panels.map(p => [p.panel, p.orchestrator]).sort(), [[one.root, a.pane], [two.root, b.pane]])
+})
+
+// Independent end-to-end verification (qa/task-6): one case driven only through
+// the public command surface with a fake adapter in a temp repo. It exercises
+// case new, check, gate/approval, dispatch, wait, status, send, close and
+// teardown, and asserts the git worktrees/branches and every exit code.
+test('end-to-end fake agents: case new → check → approve → dispatch → wait → status → send → close → teardown', { skip: spawnSync('tmux', ['-V']).status !== 0, timeout: 60000 }, async t => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'attest-e2e-')))
+  const root = join(base, 'repo')
+  const home = join(base, 'home')
+  mkdirSync(root)
+  mkdirSync(home)
+  const socket = `attest-e2e-${process.pid}-${randomUUID().slice(0, 8)}`
+  const env = { ...hostless(process.env), TMUX: undefined, TMUX_PANE: undefined, ATTEST_TMUX_SOCKET: socket }
+  t.after(() => {
+    tmux(['kill-server'], undefined, env)
+    rmSync(base, { recursive: true, force: true })
+  })
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  const gitIn = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  git('init', '-q', '-b', 'main')
+  git('config', 'user.name', 'Probe')
+  git('config', 'user.email', 'probe@example.invalid')
+  const agent = join(base, 'fake-agent.sh')
+  // The adapter writes .attest/result.md as soon as it starts, then stays ready
+  // for a line, writing a second result; this is the documented adapter contract.
+  writeFileSync(agent, `#!/bin/sh
+printf '\\033[2J\\033[HREADY\\n'
+mkdir -p .attest
+printf '%s\\n' '---' 'status: done' 'summary: "fake agent completed the task"' '---' 'E2E result evidence.' > .attest/result.md
+while IFS= read -r line; do
+  printf '%s\\n' '---' 'status: done' 'summary: "fake agent received a line"' '---' "$line" > .attest/result.md
+  printf '\\033[2J\\033[HREADY\\n'
+done
+`)
+  chmodSync(agent, 0o755)
+  mkdirSync(join(root, '.attest/agents'), { recursive: true })
+  writeFileSync(join(root, '.attest/agents/fake.yaml'), `command: ${JSON.stringify(agent)}
+model: []
+effort: []
+permission:
+  - [--policy]
+prompt: last-arg
+screen:
+  waits: ['^WAIT$']
+  working: ['^WORKING$']
+  ready: ['^READY$']
+paste: bracketed
+`)
+  writeFileSync(join(root, 'README'), 'e2e\n')
+  git('add', '.')
+  git('-c', 'user.name=Probe', '-c', 'user.email=probe@example.invalid', 'commit', '-qm', 'initial')
+  const r = runtime({ cwd: root, home, env, inputTTY: false, outputTTY: false })
+
+  // case new: worktree on case/<name>, plan in the worktree, new case bound to the pane.
+  const made = await execute('case', ['new', 'e2e'], r)
+  assert.equal(made.code, 0, made.out)
+  assert.match(made.out, /Case e2e: .*\.attest\/cases\/e2e on case\/e2e/)
+  assert.equal(git('rev-parse', '--verify', 'case/e2e').trim().length, 40)
+  assert.equal(git('symbolic-ref', '--short', 'HEAD').trim(), 'main', 'case new never switches the main checkout')
+  const caseWorktree = join(root, '.attest/cases/e2e')
+  assert.ok(existsSync(join(caseWorktree, 'docs/cases/e2e/plan.md')))
+  const twice = await execute('case', ['new', 'e2e'], r)
+  assert.equal(twice.code, 1, twice.out)
+  assert.match(twice.out, /already exists/, 'a taken case branch is refused, not silently reused')
+
+  // a real plan, committed on the case branch and pushed to a bare origin so a
+  // safe (non-force) teardown can prove the case branch is safe to remove.
+  writeFileSync(join(caseWorktree, 'docs/cases/e2e/plan.md'), `# E2E
+\`\`\`yaml
+goal: "E2E: a fake agent completes a case"
+base: case/e2e
+roles:
+  api:
+    agent: fake
+    flags: [--policy, ask]
+    touches: []
+\`\`\`
+
+## Role: api
+
+Complete the fake work.
+`)
+  gitIn(caseWorktree, 'add', 'docs/cases/e2e/plan.md')
+  gitIn(caseWorktree, 'commit', '-qm', 'e2e: plan')
+  git('init', '-q', '--bare', join(base, 'origin.git'))
+  git('remote', 'add', 'origin', join(base, 'origin.git'))
+  git('push', '-q', '-u', 'origin', 'case/e2e')
+
+  // check: the plan is clean; a missing case is a usage-class refusal (exit 2).
+  const checked = await execute('check', ['-m', 'e2e'], r)
+  assert.equal(checked.code, 0, checked.out)
+  assert.match(checked.out, /docs\/cases\/e2e\/plan\.md: clean \(1 role: api\)/)
+  const missing = await execute('check', ['-m', 'nope'], r)
+  assert.equal(missing.code, 2, missing.out)
+  assert.match(missing.out, /attest check: no plan at docs\/cases\/nope\/plan\.md/)
+
+  // approve is terminal-only; the gate flow is the documented substitute for tests.
+  const refusedApprove = await execute('approve', [], r)
+  assert.equal(refusedApprove.code, 1, refusedApprove.out)
+  assert.match(refusedApprove.out, /approve requires both stdin and stdout to be terminals/)
+  const opened = await execute('gate', ['plan', 'E2E plan ready', '--no-wait', '-m', 'e2e'], r)
+  assert.equal(opened.code, 0, opened.out)
+  assert.match(opened.out, /Opened gate plan/)
+  const m = caseOf(r, 'e2e')
+  append(m.log, 'panel', { ev: 'gate-answer', gate: 'plan', answer: 'approve', plan: m.hash })
+  const answered = await execute('wait', ['--gate', 'plan', '--timeout', '5', '-m', 'e2e'], r)
+  assert.equal(answered.code, 0, answered.out)
+  assert.match(answered.out, /^approve/m)
+  const sendBeforeDispatch = await execute('send', ['api', 'hello', '-m', 'e2e'], r)
+  assert.equal(sendBeforeDispatch.code, 1, sendBeforeDispatch.out)
+  assert.match(sendBeforeDispatch.out, /role api: no open pane recorded by attest/)
+  const unknownRole = await execute('dispatch', ['bogus', '-m', 'e2e'], r)
+  assert.equal(unknownRole.code, 1, unknownRole.out)
+  assert.match(unknownRole.out, /unknown role: bogus/)
+
+  // dispatch: one worktree and role branch per role, clean tree, brief in both places.
+  const dispatched = await execute('dispatch', ['api', '-m', 'e2e'], r)
+  assert.equal(dispatched.code, 0, dispatched.out)
+  assert.match(dispatched.out, /Dispatched api to %\d+; .*\.attest\/worktrees\/e2e\/api on role\/e2e\/api/)
+  const dispatch = readLog(m.log).events.find(e => e.ev === 'dispatch')
+  assert.equal(dispatch.role, 'api')
+  assert.equal(dispatch.branch, 'role/e2e/api')
+  assert.equal(dispatch.worktree, join(root, '.attest/worktrees/e2e/api'))
+  assert.equal(dispatch.base, git('rev-parse', 'case/e2e').trim())
+  assert.equal(git('rev-parse', '--verify', 'role/e2e/api').trim().length, 40)
+  assert.equal(existsSync(join(dispatch.worktree, '.attest/brief.md')), true)
+  assert.equal(readFileSync(join(dispatch.worktree, '.attest/brief.md'), 'utf8'), readFileSync(join(m.common, 'attest/e2e/brief-api.md'), 'utf8'))
+  assert.match(readFileSync(join(dispatch.worktree, '.attest/brief.md'), 'utf8'), /Complete the fake work\./)
+  assert.equal(gitIn(dispatch.worktree, 'status', '--porcelain', '--untracked-files=all').trim(), '')
+
+  // wait for the result the adapter wrote at startup (tolerate the write race).
+  let waited
+  for (let n = 0; n < 100; n++) {
+    waited = await execute('wait', ['--role', 'api', '--timeout', '1', '-m', 'e2e'], r)
+    if (waited.code === 0) break
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  assert.equal(waited.code, 0, waited.out)
+  assert.match(waited.out, /done: fake agent completed the task/)
+  const ready = await execute('wait', ['--role', 'api', '--ready', '--timeout', '5', '-m', 'e2e'], r)
+  assert.equal(ready.code, 0, ready.out)
+  assert.match(ready.out, /api: ready/)
+
+  // status --json: the role reports its branch, result summary and no outside changes.
+  const status = JSON.parse((await execute('status', ['--json', '-m', 'e2e'], r)).out)
+  assert.equal(status.case, 'e2e')
+  assert.equal(status.roles.length, 1)
+  assert.equal(status.roles[0].state, 'done')
+  assert.equal(status.roles[0].branch, 'role/e2e/api')
+  assert.equal(status.roles[0].summary, 'fake agent completed the task')
+  assert.deepEqual(status.roles[0].outside, [])
+  assert.deepEqual(status.roles[0].changed, [])
+
+  // send types into the ready pane; the next result reports the line and is moved to the log side.
+  const sent = await execute('send', ['api', 'turn two', '-m', 'e2e'], r)
+  assert.equal(sent.code, 0, sent.out)
+  let second
+  for (let n = 0; n < 100; n++) {
+    second = await execute('wait', ['--role', 'api', '--timeout', '1', '-m', 'e2e'], r)
+    if (second.code === 0 && /received a line/.test(second.out)) break
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  assert.equal(second.code, 0, second.out)
+  assert.match(second.out, /done: fake agent received a line/)
+  assert.match(readFileSync(join(dispatch.worktree, '.attest/result.md'), 'utf8'), /turn two/)
+  assert.equal(readLog(m.log).events.filter(e => e.ev === 'send').length, 1)
+
+  // close keeps the worktree and branch for the review/merge stage.
+  const closed = await execute('close', ['api', '-m', 'e2e'], r)
+  assert.equal(closed.code, 0, closed.out)
+  assert.ok(existsSync(dispatch.worktree))
+  assert.equal(git('rev-parse', '--verify', 'role/e2e/api').trim().length, 40)
+
+  // teardown refuses while the workflow gates are unanswered and keeps everything.
+  const sweptEarly = await execute('teardown', ['-m', 'e2e'], r)
+  assert.equal(sweptEarly.code, 1, sweptEarly.out)
+  assert.match(sweptEarly.out, /gate mr-ok: not approved yet/)
+  assert.ok(existsSync(dispatch.worktree))
+  assert.ok(existsSync(caseWorktree))
+  for (const gate of ['mr-ok', 'merged']) append(m.log, 'panel', { ev: 'gate-answer', gate, answer: 'approve' })
+
+  // teardown: the role worktree/branch go, the pushed case branch is kept.
+  const torn = await execute('teardown', ['-m', 'e2e'], r)
+  assert.equal(torn.code, 0, torn.out)
+  assert.match(torn.out, /Tore down e2e; kept case branch case\/e2e/)
+  assert.equal(existsSync(dispatch.worktree), false)
+  assert.equal(existsSync(caseWorktree), false)
+  assert.equal(git('branch', '--list', 'role/e2e/*').trim(), '')
+  assert.equal(git('branch', '--list', 'case/e2e').trim(), 'case/e2e')
+  assert.equal(readLog(m.log).events.at(-1).ev, 'teardown')
+  assert.match((await execute('send', ['api', 'after teardown', '-m', 'e2e'], r)).out, /no plan for case e2e|role api: no open pane recorded/)
+})
+
+// ---- `attest audit` (qa/task-6): the Jev ledger commands end to end. Records
+// are written through the real ledger module, then read back through the CLI
+// surface the lead wires; a middle record is edited to prove verify refuses it
+// with the record number.
+const auditDecision = (id, second, probability, band, action, reason) => ({
+  id,
+  at: `2026-11-15T12:0${second}:00.000Z`,
+  provider: 'heuristic',
+  stateDigest: `sha256:${String(second).padStart(2, '0').repeat(32)}`,
+  answers: { risk: { kind: 'noul', probability } },
+  band,
+  action,
+  reason,
+  latencyMs: 2,
+  reasonCode: 'policy.shadow',
+})
+
+const auditWorld = t => {
+  const base = mkdtempSync(join(tmpdir(), 'attest-audit-'))
+  t.after(() => rmSync(base, { recursive: true, force: true }))
+  const root = join(base, 'repo')
+  const home = join(base, 'home')
+  const gitIn = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  mkdirSync(join(root, 'docs/cases/audit'), { recursive: true })
+  mkdirSync(join(root, '.attest/agents'), { recursive: true })
+  mkdirSync(home)
+  writeFileSync(join(root, '.attest/agents/fake.yaml'), 'command: fake\nmodel: []\neffort: []\npermission:\n  - [--policy]\nprompt: last-arg\n')
+  writeFileSync(join(root, 'docs/cases/audit/plan.md'), `# Audit case
+\`\`\`yaml
+goal: "Audit CLI verification"
+base: main
+audit:
+  mode: shadow
+  provider: heuristic
+roles:
+  api:
+    agent: fake
+    flags: [--policy, ask]
+    touches: []
+\`\`\`
+
+## Role: api
+
+Do nothing.
+`)
+  gitIn(root, 'init', '-q', '-b', 'main')
+  gitIn(root, 'config', 'user.name', 'Probe')
+  gitIn(root, 'config', 'user.email', 'probe@example.invalid')
+  gitIn(root, 'add', '.')
+  gitIn(root, 'commit', '-qm', 'initial')
+  const r = runtime({ cwd: root, home })
+  const m = caseOf(r, 'audit')
+  return { base, root, home, r, m, ledger: ledgerPath(m.common, 'audit') }
+}
+
+test('audit CLI: verify/report/show/outcome/calibrate over a real ledger, JSON shapes, exit codes and a tampered record', { timeout: 30000 }, async t => {
+  const w = auditWorld(t)
+  appendDecision(w.ledger, auditDecision('plan.risk', 1, 0.82, 'high', 'shadow', 'the plan runs a destructive command'))
+  appendDecision(w.ledger, auditDecision('merge.risk', 2, 0.10, 'low', 'shadow', 'changes stay inside the touches'))
+  const run = (...args) => execute('audit', [...args, '-m', 'audit'], w.r)
+
+  // verify: exit 0, the count, and the audit-verify record it appends.
+  const verified = await run('verify')
+  assert.equal(verified.code, 0, verified.out)
+  assert.match(verified.out, /OK 2 records/)
+  assert.match(verified.out, /Verify record 2 appended/)
+  const verifiedJson = JSON.parse((await run('verify', '--json')).out)
+  assert.equal(verifiedJson.ok, true)
+  assert.equal(verifiedJson.length, 3, 'a verify appends its own record')
+  assert.equal(verifiedJson.appended, 3)
+  assert.equal(verifiedJson.brokenAt, undefined)
+
+  // report: JSON shape, text and --write into the case worktree.
+  const report = JSON.parse((await run('report', '--json')).out)
+  assert.equal(report.case, 'audit')
+  assert.equal(report.chain.ok, true)
+  assert.equal(report.mode, 'shadow')
+  assert.equal(report.provider, 'heuristic')
+  assert.deepEqual(report.counts, { allow: 0, ask: 0, block: 0, shadow: 2 })
+  assert.deepEqual(report.bands, { low: 1, medium: 0, high: 1, unknown: 0 })
+  assert.equal(report.risk, 'high')
+  assert.equal(report.decisions.length, 2)
+  assert.equal(report.decisions[0].id, 'plan.risk')
+  assert.equal(report.decisions[0].probability, 0.82)
+  const reportText = await run('report')
+  assert.equal(reportText.code, 0, reportText.out)
+  assert.match(reportText.out, /# Audit: audit/)
+  assert.match(reportText.out, /- Chain: OK 4 records/)
+  const wrote = await run('report', '--write')
+  assert.equal(wrote.code, 0, wrote.out)
+  const auditMd = join(w.root, 'docs/cases/audit/audit.md')
+  assert.equal(existsSync(auditMd), true)
+  assert.match(readFileSync(auditMd, 'utf8'), /# Audit: audit/)
+  assert.match(wrote.out, /Wrote .*docs\/cases\/audit\/audit\.md/)
+
+  // show: by sequence number and by decision id; a miss is a refusal.
+  const shown = await run('show', '0')
+  assert.equal(shown.code, 0, shown.out)
+  assert.match(shown.out, /seq 0 · plan\.risk · 2026-11-15T12:01:00\.000Z/)
+  assert.match(shown.out, /band high · action shadow · provider heuristic/)
+  assert.match(shown.out, new RegExp(`state sha256:${'01'.repeat(32)}`))
+  assert.match(shown.out, /reason the plan runs a destructive command/)
+  assert.match((await run('show', 'merge.risk')).out, /seq 1 · merge\.risk/)
+  const missing = await run('show', 'nope')
+  assert.equal(missing.code, 1, missing.out)
+  assert.match(missing.out, /no audit decision nope for case audit/)
+
+  // outcome: records a human verdict for calibration; JSON shape and usage errors.
+  const recorded = await run('outcome', 'plan.risk', 'defect', '--note', 'the destructive step was real')
+  assert.equal(recorded.code, 0, recorded.out)
+  assert.match(recorded.out, /Recorded outcome for plan\.risk \(seq 0\): expected shadow, observed defect · the destructive step was real/)
+  const outcomeJson = JSON.parse((await run('outcome', 'merge.risk', 'pass', '--json')).out)
+  assert.equal(outcomeJson.payload.id, 'merge.risk')
+  assert.equal(outcomeJson.payload.target, 1)
+  assert.equal(outcomeJson.payload.observed, 'pass')
+  assert.equal(outcomeJson.payload.source, 'human')
+  const badVerdict = await run('outcome', 'plan.risk', 'maybe')
+  assert.equal(badVerdict.code, 2, badVerdict.out)
+  assert.match(badVerdict.out, /verdict must be one of allow, ask, block, defect, pass/)
+
+  // calibrate: below the minimum, JSON shape, then enough outcomes for a Brier score.
+  const low = await run('calibrate')
+  assert.equal(low.code, 0, low.out)
+  assert.match(low.out, /insufficient outcomes: 2 sample\(s\)/)
+  const calib = JSON.parse((await run('calibrate', '--json')).out)
+  assert.equal(calib.case, 'audit')
+  assert.equal(calib.n, 2)
+  assert.equal(calib.sufficient, false)
+  assert.equal(typeof calib.brier, 'number')
+  assert.equal(calib.bins.length, 5)
+  for (let n = 0; n < 3; n += 1) assert.equal((await run('outcome', 'plan.risk', 'pass')).code, 0)
+  const enough = await run('calibrate')
+  assert.equal(enough.code, 0, enough.out)
+  assert.match(enough.out, /Calibration: 5 sample\(s\)/)
+  assert.match(enough.out, /Brier score: \d\.\d{3}/)
+  const enoughJson = JSON.parse((await run('calibrate', '--json')).out)
+  assert.equal(enoughJson.sufficient, true)
+  assert.ok(enoughJson.suggestions.length > 0)
+
+  // A middle record edited after the chain was sealed: verify refuses it with
+  // the record number, and no command appends past the break.
+  const lines = readFileSync(w.ledger, 'utf8').trimEnd().split('\n')
+  const tampered = JSON.parse(lines[1])
+  tampered.payload.reason = 'edited after the fact'
+  lines[1] = JSON.stringify(tampered)
+  writeFileSync(w.ledger, `${lines.join('\n')}\n`)
+  const broken = await run('verify')
+  assert.equal(broken.code, 1, broken.out)
+  assert.match(broken.out, /BROKEN at record 1/)
+  assert.match(broken.out, /hash mismatch/)
+  const brokenJson = JSON.parse((await run('verify', '--json')).out)
+  assert.equal(brokenJson.ok, false)
+  assert.equal(brokenJson.brokenAt, 1)
+  assert.equal(brokenJson.length, 1, 'only the records before the break verify')
+  assert.equal((await run('report')).code, 1, 'the report keeps the broken chain visible')
+  const refusedOutcome = await run('outcome', 'plan.risk', 'pass')
+  assert.equal(refusedOutcome.code, 1, refusedOutcome.out)
+  assert.match(refusedOutcome.out, /audit ledger is broken at record 1/)
+
+  // usage: a missing or unknown action exits 2 without touching the case.
+  const noAction = await execute('audit', ['-m', 'audit'], w.r)
+  assert.equal(noAction.code, 2, noAction.out)
+  const unknown = await run('bogus')
+  assert.equal(unknown.code, 2, unknown.out)
+  assert.match(unknown.out, /choose verify, report, show, outcome, calibrate/)
+})
+
+// ---- `attest stage audit` (qa/task-6): the workflow audit stage must do real
+// work — verify the chain, record a fidelity decision per finished result and
+// write the report — instead of only moving a marker; enforce mode must stop
+// the stage on a block.
+const stageWorld = (t, auditBlock) => {
+  const base = mkdtempSync(join(tmpdir(), 'attest-stage-audit-'))
+  t.after(() => rmSync(base, { recursive: true, force: true }))
+  const root = join(base, 'repo')
+  const home = join(base, 'home')
+  mkdirSync(join(root, 'docs/cases/audit'), { recursive: true })
+  mkdirSync(join(root, '.attest/agents'), { recursive: true })
+  mkdirSync(home)
+  writeFileSync(join(root, '.attest/agents/fake.yaml'), 'command: fake\nmodel: []\neffort: []\npermission:\n  - [--policy]\nprompt: last-arg\n')
+  writeFileSync(join(root, 'docs/cases/audit/plan.md'), `# Stage audit
+\`\`\`yaml
+attest: 1
+goal: "Stage audit records evidence"
+base: main
+audit:
+${auditBlock}
+roles:
+  api:
+    agent: fake
+    flags: [--policy, ask]
+    touches: []
+\`\`\`
+
+## Done when
+
+- It works.
+
+## Role: api
+
+Do it.
+`)
+  const gitIn = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  gitIn(root, 'init', '-q', '-b', 'main')
+  gitIn(root, 'config', 'user.name', 'Probe')
+  gitIn(root, 'config', 'user.email', 'probe@example.invalid')
+  gitIn(root, 'add', '.')
+  gitIn(root, 'commit', '-qm', 'initial')
+  const r = runtime({ cwd: root, home })
+  const m = caseOf(r, 'audit')
+  append(m.log, 'cli', { ev: 'dispatch', role: 'api', agent: 'fake', session: '$1', window: '@1', pane: '%1', owner: 'owner', worktree: root, branch: 'role/audit/api', base: 'main', argv: ['fake'] })
+  mkdirSync(join(root, '.attest'), { recursive: true })
+  return { base, root, home, r, m, resultFile: join(root, '.attest/result.md') }
+}
+
+test('stage audit verifies the chain, records a result.fidelity decision per finished result and writes the report', { timeout: 30000 }, async t => {
+  const w = stageWorld(t, '  mode: shadow\n  provider: heuristic')
+  writeFileSync(w.resultFile, '---\nstatus: done\nsummary: "the endpoint works"\n---\nNo command output, no commits, no evidence.')
+  // A pre-existing decision makes the stage's chain verify append its own record.
+  const ledger = ledgerPath(w.m.common, 'audit')
+  appendDecision(ledger, auditDecision('plan.risk', 0, 0.2, 'low', 'shadow', 'the plan is small'))
+  const staged = await execute('stage', ['audit', '-m', 'audit'], w.r)
+  assert.equal(staged.code, 0, staged.out)
+  assert.match(staged.out, /Stage: audit/)
+  assert.match(staged.out, /OK 1 records/)
+  assert.match(staged.out, /Verify record 1 appended/)
+  assert.match(staged.out, /result\.fidelity/)
+  assert.match(staged.out, /Audit report: .*docs\/cases\/audit\/audit\.md/)
+  assert.match(staged.out, /risk \w+ · allow \d+ · ask \d+ · block \d+ · shadow \d+/)
+  const reportFile = join(w.root, 'docs/cases/audit/audit.md')
+  assert.equal(existsSync(reportFile), true)
+  assert.match(readFileSync(reportFile, 'utf8'), /# Audit: audit/)
+  assert.match(readFileSync(reportFile, 'utf8'), /result\.fidelity/)
+  assert.equal(readLog(w.m.log).events.at(-1).ev, 'stage')
+  assert.equal(readLog(w.m.log).events.at(-1).stage, 'audit')
+  const records = readFileSync(ledger, 'utf8').trimEnd().split('\n').map(line => JSON.parse(line))
+  assert.equal(records.filter(one => one.type === 'audit-verify').length, 1, 'the stage appends its audit-verify record')
+  const decisions = records.filter(one => one.type === 'audit-decision')
+  assert.equal(decisions.some(one => one.payload.id === 'result.fidelity'), true, 'the stage records a fidelity decision')
+  assert.equal(decisions.every(one => one.payload.action === 'shadow'), true, 'shadow mode records but never refuses')
+
+  // Tampering with a middle record makes the stage refuse before it moves.
+  const stages = () => readLog(w.m.log).events.filter(event => event.ev === 'stage' && event.stage === 'audit').length
+  const before = stages()
+  const tampered = JSON.parse(readFileSync(ledger, 'utf8').trimEnd().split('\n')[1])
+  tampered.payload.length = 99
+  const lines = readFileSync(ledger, 'utf8').trimEnd().split('\n')
+  lines[1] = JSON.stringify(tampered)
+  writeFileSync(ledger, `${lines.join('\n')}\n`)
+  const broken = await execute('stage', ['audit', '-m', 'audit'], w.r)
+  assert.equal(broken.code, 1, broken.out)
+  assert.match(broken.out, /BROKEN at record 1/)
+  assert.match(broken.out, /hash mismatch/)
+  assert.equal(stages(), before, 'a broken chain leaves the stage where it was')
+})
+
+test('stage audit in enforce mode stops on a blocked result and does not move the stage', { timeout: 30000 }, async t => {
+  const w = stageWorld(t, '  mode: enforce\n  provider: heuristic')
+  writeFileSync(w.resultFile, '---\nstatus: failed\nsummary: "x"\n---\ny')
+  const staged = await execute('stage', ['audit', '-m', 'audit'], w.r)
+  assert.equal(staged.code, 1, staged.out)
+  assert.match(staged.out, /result\.fidelity/)
+  assert.match(staged.out, /block|ask/)
+  assert.equal(readLog(w.m.log).events.some(event => event.ev === 'stage' && event.stage === 'audit'), false, 'a blocked stage does not move')
+  assert.equal(existsSync(join(w.root, 'docs/cases/audit/audit.md')), false, 'no report is written after a block')
+  const ledger = ledgerPath(w.m.common, 'audit')
+  const decisions = readFileSync(ledger, 'utf8').trimEnd().split('\n').map(line => JSON.parse(line)).filter(one => one.type === 'audit-decision')
+  assert.equal(decisions.some(one => one.payload.id === 'result.fidelity' && one.payload.band === 'high'), true)
 })

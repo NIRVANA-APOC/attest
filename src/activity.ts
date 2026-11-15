@@ -2,6 +2,8 @@ import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+import { z } from 'zod'
+
 import { claudeTurnEnded } from './usage.ts'
 
 /** Where a Claude role's lifecycle hooks leave its turn: busy, waiting on the person, or ready. */
@@ -11,23 +13,38 @@ export const ACTIVITY_FILE = '.attest/activity.json'
  * batch of tool calls, after all of them: it ends a wait the person answered (approved, or denied with feedback).
  * A plain deny or an interrupt fires no hook; the transcript's interrupt row ends that wait (see claudeActivity).
  */
-export const ACTIVITY_EVENTS = ['UserPromptSubmit', 'PercaseRequest', 'PostToolBatch', 'Stop', 'Notification'] as const
+export const ACTIVITY_EVENTS = ['UserPromptSubmit', 'PermissionRequest', 'PostToolBatch', 'Stop', 'Notification'] as const
 /** A turn as the agent reports it. Busy covers working and waiting on an approval; the screen tells those two apart. */
 export type Turn = 'busy' | 'ready'
 /** A Claude role reports its waits too: its permission dialog (approvals, questions) holds the turn. */
 export type ClaudeTurn = Turn | 'waits'
 
-type Object = Record<string, unknown>
-const object = (value: unknown): value is Object => typeof value === 'object' && value !== null && !Array.isArray(value)
+/**
+ * Shape of the two documents this module reads: the hook payload on stdin (external, untrusted) and the saved
+ * turn file (written here, but a hand edit or a half write must read as absent, never throw).
+ */
+const HOOK = z.object({
+  hook_event_name: z.string(),
+  notification_type: z.string().optional(),
+  session_id: z.string().optional(),
+}).loose()
+const TURN = z.enum(['busy', 'ready', 'waits'])
+const ANSWER = z.object({ at: z.string(), then: z.enum(['working', 'stopped']) })
+const SAVED = z.object({
+  turn: TURN,
+  at: z.string(),
+  session: z.string().optional().catch(undefined),
+  answers: z.array(z.unknown()).optional().catch(undefined),
+}).loose()
 
 /**
  * Claude Code hook payload → turn. A prompt or a finished tool batch runs a turn; an approval request holds it on
  * the person; Stop, or the idle notice after an interrupt, ends it.
  */
-const turnOfHook = (payload: Object): ClaudeTurn | undefined => {
+const turnOfHook = (payload: z.infer<typeof HOOK>): ClaudeTurn | undefined => {
   const event = payload.hook_event_name
   if (event === 'UserPromptSubmit' || event === 'PostToolBatch') return 'busy'
-  if (event === 'PercaseRequest') return 'waits'
+  if (event === 'PermissionRequest') return 'waits'
   if (event === 'Stop') return 'ready'
   if (event === 'Notification' && payload.notification_type === 'idle_prompt') return 'ready'
 
@@ -35,18 +52,22 @@ const turnOfHook = (payload: Object): ClaudeTurn | undefined => {
 }
 
 /** How a wait on the person ended: the turn went on, or a deny or an interrupt stopped it. */
-export type Answer = { at: string; then: 'working' | 'stopped' }
+export type Answer = z.infer<typeof ANSWER>
 /** Older answers have long been told or superseded; the cap keeps a hook's read and write small. */
 const ANSWERS = 50
 type Saved = { turn: ClaudeTurn; at: string; session?: string; answers: Answer[] }
-const answer = (value: unknown): value is Answer =>
-  object(value) && typeof value.at === 'string' && (value.then === 'working' || value.then === 'stopped')
+const answersOf = (values: unknown[] | undefined): Answer[] => (values ?? []).flatMap(one => {
+  const parsed = ANSWER.safeParse(one)
+
+  return parsed.success ? [parsed.data] : []
+})
 const read = (file: string): Saved | undefined => {
   try {
-    const saved: unknown = JSON.parse(readFileSync(file, 'utf8'))
-    if (!object(saved) || (saved.turn !== 'busy' && saved.turn !== 'ready' && saved.turn !== 'waits') || typeof saved.at !== 'string') return undefined
+    const saved = SAVED.safeParse(JSON.parse(readFileSync(file, 'utf8')))
+    if (!saved.success) return undefined
+    const { turn, at, session, answers } = saved.data
 
-    return { turn: saved.turn, at: saved.at, ...(typeof saved.session === 'string' ? { session: saved.session } : {}), answers: Array.isArray(saved.answers) ? saved.answers.filter(answer) : [] }
+    return { turn, at, ...(session === undefined ? {} : { session }), answers: answersOf(answers) }
   } catch {
     return undefined
   }
@@ -68,14 +89,15 @@ const stoppedAt = (saved: Saved, home: string): string | undefined => {
  */
 export const recordActivity = (input: string, file: string, now = new Date(), home = homedir()): void => {
   try {
-    const payload: unknown = JSON.parse(input)
-    if (!object(payload)) return
+    const parsed = HOOK.safeParse(JSON.parse(input))
+    if (!parsed.success) return
+    const payload = parsed.data
     const turn = turnOfHook(payload)
     if (turn === undefined) return
     const before = read(file)
     const answers = [...before?.answers ?? []]
     if (before?.turn === 'waits' && payload.hook_event_name === 'PostToolBatch') answers.push({ at: now.toISOString(), then: 'working' })
-    else if (before?.turn === 'waits' && payload.hook_event_name !== 'PercaseRequest') answers.push({ at: stoppedAt(before, home) ?? now.toISOString(), then: 'stopped' })
+    else if (before?.turn === 'waits' && payload.hook_event_name !== 'PermissionRequest') answers.push({ at: stoppedAt(before, home) ?? now.toISOString(), then: 'stopped' })
     const temp = `${file}.${process.pid}.tmp`
     writeFileSync(temp, `${JSON.stringify({ turn, event: payload.hook_event_name, session: payload.session_id ?? null, at: now.toISOString(), answers: answers.slice(-ANSWERS) })}\n`)
     renameSync(temp, file)

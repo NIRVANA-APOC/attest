@@ -1,6 +1,7 @@
 import { badgeOf } from './agents.ts'
 import type { Agent, Badge } from './agents.ts'
 import { known, t } from './i18n.ts'
+import type { AuditView } from './jev/types.ts'
 import { isApproved, PLAN_GATE } from './log.ts'
 import type { Folded, Logged } from './log.ts'
 import { sectionsOf } from './plan.ts'
@@ -56,6 +57,8 @@ export type PanelModel = {
   now: number
   /** While the orchestrator drafts the plan: since when, in ms, when known. */
   drafting?: { since?: number }
+  /** The case's audit ledger as the panel shows it; absent until the Jev view reads one. */
+  audit?: AuditView
 }
 
 /** A span as the panel shows it: 42s, 3m 12s, 1h 4m. */
@@ -118,6 +121,7 @@ export type ModelInput = {
   now: Date
   agents?: Record<string, Agent>
   drafting?: { since?: number }
+  audit?: AuditView
 }
 
 export const modelOf = (input: ModelInput): PanelModel => {
@@ -181,5 +185,6 @@ export const modelOf = (input: ModelInput): PanelModel => {
     clock: clockOf(input.now),
     now: input.now.getTime(),
     ...(input.drafting && { drafting: input.drafting }),
+    ...(input.audit && { audit: input.audit }),
   }
 }

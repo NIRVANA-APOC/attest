@@ -36,7 +36,24 @@ export const switchedTo = (lang: Lang): string => lang === 'zh'
 
 const ZH = {
   // Tabs, columns, sections
-  'CASE': '任务', 'ROLES': '角色', 'PLAN': '计划', 'LOG': '日志', 'DIFF': '改动',
+  'CASE': '任务', 'ROLES': '角色', 'PLAN': '计划', 'LOG': '日志', 'DIFF': '改动', 'AUDIT': '审计',
+  'LEDGER': '账本', 'BANDS': '分级', 'DECISION': '决策详情', 'DECISIONS': '决策记录', 'CALIBRATION': '校准',
+  // The audit ledger's words; band and action values are data, translated where the panel names them
+  'allow': '放行', 'ask': '询问', 'block': '拦截', 'shadow': '影子', 'enforce': '强制', 'off': '关闭',
+  'low': '低', 'medium': '中', 'high': '高',
+  'risk {0}': '风险 {0}', 'mode {0}': '模式 {0}', 'provider {0}': '提供方 {0}',
+  'chain verified': '链已验证', 'chain broken': '链已断裂', 'chain broken at record {0}': '链在第 {0} 条记录处断裂', 'chain incomplete': '链不完整',
+  '{0} record': '{0} 条记录', '{0} records': '{0} 条记录', 'last {0}': '最近 {0}',
+  'reason': '原因', 'state digest': '状态摘要', 'not recorded': '未记录',
+  '{0} more line': '还有 {0} 行', '{0} more lines': '还有 {0} 行', 'select a decision': '选择一个决策',
+  'no decisions yet': '还没有决策', 'the ledger fills as the case runs': '账本会随案件推进写入',
+  'no calibration yet': '还没有校准数据', 'record outcomes with attest audit outcome': '用 attest audit outcome 记录实际结果',
+  '{0} outcome': '{0} 条结果', '{0} outcomes': '{0} 条结果',
+  'Audit is not recorded for this case.': '这个案件还没有审计记录。',
+  'Add an audit: block to the plan (mode: shadow or enforce, provider: heuristic or typesafe), then run attest stage audit.': '在计划的 audit: 配置块里设置 mode（shadow 或 enforce）和 provider（heuristic 或 typesafe），然后运行 attest stage audit。',
+  "Decisions land in this case's audit ledger as it runs.": '案件推进时，决策会写入该案件的审计账本。',
+  'Audit is disabled for this case: the plan sets audit.provider to off.': '这个案件关闭了审计：计划里 audit.provider 设为 off。',
+  'Set provider to heuristic or typesafe in the plan to record decisions again.': '把计划里的 provider 改回 heuristic 或 typesafe，就能重新记录决策。',
   'STAGES': '阶段', 'ACTIVITY': '动态', 'FLOW': '流程', 'CONTENTS': '目录', 'scroll for more ↓': '滚动查看更多 ↓',
   'Goal': '目标', 'Why': '原因', 'Done when': '完成标准', 'Roles': '角色', 'Decisions': '待定决策', 'Out of scope': '不做的事',
   'APPROVE THE PLAN': '批准计划',
@@ -44,7 +61,7 @@ const ZH = {
   'planned': '待启动', 'working': '工作中', 'idle': '空闲', 'waits on you': '等你处理', 'done': '完成', 'blocked': '受阻',
   'failed': '失败', 'gone': '已消失', 'closed': '已关闭', 'unknown': '未知',
   // Stages of the default workflow
-  'Plan': '计划', 'Plan OK?': '计划可以吗？', 'Build': '构建', 'Review': '审查', 'MR OK?': 'MR 可以吗？', 'Open MR': '开 MR',
+  'Plan': '计划', 'Plan OK?': '计划可以吗？', 'Build': '构建', 'Review': '审查', 'Audit': '审计', 'MR OK?': 'MR 可以吗？', 'Open MR': '开 MR',
   'Merged?': '已合并？', 'Teardown': '清理',
   // Roles and their fields
   'after {0}': '{0} 之后', 'as each lands': '随到随审', 'starts at once': '立即开始', 'at once': '立即', 'default': '默认',
@@ -65,6 +82,7 @@ const ZH = {
   // Keys and buttons
   'Approve': '批准', 'Change…': '修改…', 'Read the plan': '查看计划', 'Change': '修改', 'Open window': '打开窗口', 'Send…': '发送…', 'Diff': '改动',
   'approve': '批准', 'change': '修改', 'plan': '计划', 'role': '角色', 'tabs': '标签页', 'help': '帮助', 'detail': '详情', 'open': '打开',
+  'decision': '决策', 'reason and digest': '原因与摘要', 'audit page': '审计页',
   'send': '发送', 'open window': '打开窗口', 'scroll': '滚动', 'line': '行', 'expand': '展开', 'follow': '跟随', 'file': '文件',
   'answer it first': '先回应它', '{0} needs you': '{0} 项待你处理', 'wheel': '滚轮', 'switch language (中/EN)': '切换语言（中/EN）',
   'select role': '选择角色', 'open role pane': '打开角色窗口', 'send to role': '发给角色', 'open an event': '展开事件',

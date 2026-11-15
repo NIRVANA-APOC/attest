@@ -1,5 +1,5 @@
  attest  auth-refresh  ·  Plan OK?                              ◆ 1 needs you  ·  12:07   中/EN
-  1 CASE   2 ROLES   3 PLAN   4 LOG   5 DIFF
+  1 CASE   2 ROLES   3 PLAN   4 LOG   5 DIFF   6 AUDIT
                                 Refresh tokens rotate on every use, and a reused one is refused
 ────────────────────────────────────────────────────────────────────────────────────────────────
 ╭─ ◆ APPROVE THE PLAN ─────────────────────────────────────────────────────────────────────────╮
@@ -55,4 +55,4 @@
   ○ Build             0/3  │   │    ╎ after api                   │
   ○ Review            0/1  │   │    ╎ ┌────────────────────────┐  │   ┌──────────────────────┐
 
- a  approve   c  change   v  plan   ↑↓  role   1-5  tabs   ?  help
+ a  approve   c  change   v  plan   ↑↓  role   1-6  tabs   ?  help

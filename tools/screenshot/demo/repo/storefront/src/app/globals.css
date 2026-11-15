@@ -1,0 +1,35 @@
+:root {
+  --surface: #ffffff;
+  --surface-raised: #f6f5f1;
+  --text: #1d2433;
+  --text-muted: #5c667a;
+  --border: #dcd9d1;
+  --accent: #2f5079;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text);
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 20px;
+  padding: 24px;
+}

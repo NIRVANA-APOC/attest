@@ -13,6 +13,7 @@ export const DEFAULT_STAGES: Stage[] = [
   { id: 'plan-ok', label: 'Plan OK?', gate: PLAN_GATE },
   { id: 'build', label: 'Build' },
   { id: 'review', label: 'Review' },
+  { id: 'audit', label: 'Audit' },
   { id: 'mr-ok', label: 'MR OK?', gate: 'mr-ok' },
   { id: 'mr', label: 'Open MR' },
   { id: 'merged', label: 'Merged?', gate: 'merged' },

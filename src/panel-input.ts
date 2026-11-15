@@ -1,4 +1,4 @@
-import { diffFileOf, diffFiles } from './draw.ts'
+import { auditRows, auditSeqOf, diffFileOf, diffFiles } from './draw.ts'
 import type { Hit, Ui } from './draw.ts'
 import { t } from './i18n.ts'
 import type { PanelModel } from './model.ts'
@@ -136,6 +136,7 @@ export const transition = (ui: PanelUi, action: Input, model: PanelModel | undef
     if (target?.kind === 'scroll') return { ui: { ...ui, scroll: Math.max(0, Math.min(maxScroll, target.to)) } }
     if (target?.kind === 'line') return { ui: openLine({ ...ui, line: target.index }, model) }
     if (target?.kind === 'file' && model.roles.some(role => role.name === target.role)) return { ui: { ...ui, file: target.key, selected: target.role, scroll: 0 } }
+    if (target?.kind === 'decision') return { ui: { ...ui, decision: target.seq } }
 
     return { ui }
   }
@@ -171,13 +172,25 @@ export const transition = (ui: PanelUi, action: Input, model: PanelModel | undef
 
     return { ui: next === undefined ? ui : { ...ui, file: next.key, selected: next.role.name, scroll: 0 } }
   }
+  if (ui.tab === 6) {
+    if (step !== 0) {
+      const rows = auditRows(model)
+      if (rows.length > 0) {
+        const at = rows.findIndex(row => row.seq === auditSeqOf(model, ui))
+        const next = rows[Math.max(0, Math.min(rows.length - 1, (at < 0 ? 0 : at) + step))]
+        if (next !== undefined) return { ui: { ...ui, decision: next.seq } }
+      }
+    }
+    // Enter opens the selected decision's full reason and state digest beside the list.
+    if (key === 'enter') return { ui: { ...ui, auditOpen: !ui.auditOpen } }
+  }
   if (['up', 'down', 'j', 'k'].includes(key)) {
     const at = model.roles.findIndex(role => role.name === selected?.name)
     const to = Math.max(0, Math.min(model.roles.length - 1, at + (key === 'up' || key === 'k' ? -1 : 1)))
 
     return { ui: { ...ui, selected: model.roles[to]?.name ?? '' } }
   }
-  const tab = /^[1-5]$/.test(key) ? Number(key) : key === 'tab' ? ui.tab % 5 + 1 : key === 'd' ? 5 : key === 'v' ? 3 : key === 'enter' ? 1 : undefined
+  const tab = /^[1-6]$/.test(key) ? Number(key) : key === 'tab' ? ui.tab % 6 + 1 : key === 'd' ? 5 : key === 'v' ? 3 : key === 'enter' ? 1 : undefined
   // `d` shows the selected role's first file.
   if (tab !== undefined) return { ui: { ...ui, tab, scroll: 0, ...(key === 'd' && { file: undefined }) } }
   if (key === '?') return { ui: { ...ui, help: true } }

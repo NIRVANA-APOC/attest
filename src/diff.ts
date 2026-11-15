@@ -9,6 +9,72 @@ export type FileDiff = { path: string; status: FileStatus; add: number; del: num
 /** The most lines kept per file; the counts stay exact. */
 const KEEP = 400
 
+/** Git's C-style quoting of a path with special characters, undone. */
+const unquote = (raw: string): string => {
+  const simple: { [key: string]: string | undefined } = { a: '\x07', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\', '"': '"' }
+  let out = ''
+  let i = 0
+  while (i < raw.length) {
+    const ch = raw[i] ?? ''
+    if (ch !== '\\') {
+      out += ch
+      i += 1
+      continue
+    }
+    const next = raw[i + 1] ?? ''
+    const named = simple[next]
+    if (named !== undefined) {
+      out += named
+      i += 2
+    } else if (/[0-7]/.test(next)) {
+      // Bytes outside printable ASCII are octal escapes, one per byte: decode a run of them as UTF-8.
+      const bytes: number[] = []
+      while (raw[i] === '\\' && /[0-7]/.test(raw[i + 1] ?? '')) {
+        const octal = /^[0-7]{1,3}/.exec(raw.slice(i + 1))?.[0] ?? ''
+        bytes.push(Number.parseInt(octal, 8))
+        i += 1 + octal.length
+      }
+      out += new TextDecoder().decode(Uint8Array.from(bytes))
+    } else {
+      out += next
+      i += 2
+    }
+  }
+
+  return out
+}
+
+/** A path from a patch header line (`+++ b/x`), quoted or not, with git's trailing tab when it holds spaces. */
+const marked = (line: string, prefix: 'a/' | 'b/'): string | undefined => {
+  const raw = line.slice(4).replace(/\t$/, '')
+  const path = raw.startsWith('"') ? (() => {
+    const quoted = /^"((?:[^"\\]|\\.)*)"$/.exec(raw)?.[1]
+
+    return quoted === undefined ? undefined : unquote(quoted)
+  })() : raw
+
+  return path?.startsWith(prefix) === true ? path.slice(prefix.length) : undefined
+}
+
+/** The file a `diff --git` line names: both sides are quoted when either needs it; with --no-renames both are the same path. */
+const headerPath = (line: string): string => {
+  const rest = line.slice('diff --git '.length)
+  const quoted = /^"((?:[^"\\]|\\.)*)" "((?:[^"\\]|\\.)*)"$/.exec(rest)
+  if (quoted !== null) {
+    const path = unquote(quoted[2] ?? '')
+
+    return path.startsWith('b/') ? path.slice(2) : path
+  }
+  if (rest.startsWith('a/')) {
+    const both = rest.slice(2)
+    const split = both.indexOf(' b/')
+    // b/<path> follows a/<path> exactly, spaces included; comparing the halves keeps a path holding " b/" intact.
+    if (split >= 0 && both.slice(0, split) === both.slice(split + 3)) return both.slice(0, split)
+  }
+
+  return rest
+}
+
 /** `git diff --no-color --no-renames` output, file by file. */
 export const parseDiff = (text: string): FileDiff[] => {
   const files: FileDiff[] = []
@@ -20,7 +86,7 @@ export const parseDiff = (text: string): FileDiff[] => {
   for (const line of text.split('\n')) {
     if (line.startsWith('diff --git ')) {
       // The `+++ b/` line below names it exactly; this is for a file with no hunks (binary, mode only).
-      file = { path: /^diff --git "?a\/(.*?)"? "?b\/(.*?)"?$/.exec(line)?.[2] ?? line.slice(11), status: 'M', add: 0, del: 0, hunks: [] }
+      file = { path: headerPath(line), status: 'M', add: 0, del: 0, hunks: [] }
       files.push(file)
       hunk = undefined
       kept = 0
@@ -31,7 +97,10 @@ export const parseDiff = (text: string): FileDiff[] => {
       if (line.startsWith('new file mode')) file.status = 'A'
       else if (line.startsWith('deleted file mode')) file.status = 'D'
       else if (line.startsWith('Binary files ')) file.binary = true
-      else if (line.startsWith('+++ b/')) file.path = line.slice(6)
+      else {
+        const path = line.startsWith('+++ b/') || line.startsWith('+++ "b/') ? marked(line, 'b/') : line.startsWith('--- a/') || line.startsWith('--- "a/') ? marked(line, 'a/') : undefined
+        if (path !== undefined && path !== '/dev/null') file.path = path
+      }
     }
     const at = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line)
     if (at !== null) {

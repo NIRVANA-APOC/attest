@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { z } from 'zod'
+
 import type { Screen } from './agents.ts'
 import { addedFile, parseDiff } from './diff.ts'
 import type { FileDiff } from './diff.ts'
@@ -31,6 +33,17 @@ export type ResultStatus = 'done' | 'blocked' | 'failed'
 export type Result = { status: ResultStatus | ''; summary: string; body: string; problem?: string; at?: string; doneWhen?: number[] }
 const STATUSES: string[] = ['done', 'blocked', 'failed']
 
+/**
+ * The result's front matter is written by an agent: read it as data, never as code. A field of the wrong
+ * type is absent (the fields around it keep their meaning), and a scalar or list root means no fields at all.
+ */
+const FRONT = z.object({
+  status: z.string().optional().catch(undefined),
+  summary: z.string().optional().catch(undefined),
+  done_when: z.array(z.unknown()).optional().catch(undefined),
+}).loose().catch({})
+const frontOf = (data: Yaml): z.infer<typeof FRONT> => FRONT.parse(data)
+
 export const resultOf = (text: string): Result => {
   const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text.replace(/\r\n/g, '\n'))
   if (match === null) return { status: '', summary: '', body: text.trim(), problem: 'no front matter' }
@@ -40,14 +53,13 @@ export const resultOf = (text: string): Result => {
   } catch (error) {
     return { status: '', summary: '', body: (match[2] ?? '').trim(), problem: (error as Error).message }
   }
-  const field = (key: string) => (typeof data === 'object' && data !== null && !Array.isArray(data) && typeof data[key] === 'string' ? data[key] : '')
-  const status = field('status')
-  const met = typeof data === 'object' && data !== null && !Array.isArray(data) ? data.done_when : undefined
-  const doneWhen = Array.isArray(met) ? met.flatMap(one => (typeof one === 'string' && /^[1-9]\d*$/.test(one) ? [Number(one)] : [])) : undefined
+  const front = frontOf(data)
+  const status = front.status ?? ''
+  const doneWhen = front.done_when?.flatMap(one => (typeof one === 'string' && /^[1-9]\d*$/.test(one) ? [Number(one)] : []))
 
   return {
     status: STATUSES.includes(status) ? (status as ResultStatus) : '',
-    summary: field('summary'),
+    summary: front.summary ?? '',
     body: (match[2] ?? '').trim(),
     ...(doneWhen && { doneWhen }),
     ...(status !== '' && !STATUSES.includes(status) ? { problem: `status "${status}" is not done, blocked or failed` } : {}),
@@ -94,9 +106,58 @@ export type Work = {
 /** A new file is shown whole up to this size. */
 const UNTRACKED = 64 * 1024
 
-/** The change against `base` as hunks: tracked files from `git diff`, new files read whole. */
-const filesOf = (worktree: string, base: string, untracked: string[], runner: Run): FileDiff[] => {
-  const tracked = parseDiff(git(worktree, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-renames', '-U3', base, '--'], runner))
+type Stat = { path: string; add: number; del: number; binary?: true }
+
+/**
+ * `git diff --numstat -z --no-renames`: each changed file with its exact counts. NUL-terminated, so a
+ * path holding spaces, quotes or non-ASCII text arrives verbatim instead of C-quoted.
+ */
+const statsOf = (worktree: string, base: string, runner: Run): Stat[] => {
+  const parts = git(worktree, ['-c', 'core.quotePath=false', 'diff', '--numstat', '-z', '--no-renames', base, '--'], runner).split('\0')
+  const out: Stat[] = []
+  const count = (text: string) => (text === '-' ? 0 : Number(text) || 0)
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i] ?? ''
+    if (part === '') continue
+    const first = part.indexOf('\t')
+    const second = part.indexOf('\t', first + 1)
+    if (first < 0 || second < 0) continue
+    let path = part.slice(second + 1)
+    // A rename reads `add\tdel\t\0old\0new\0`; --no-renames never asks for one, but the shape is cheap to honour.
+    if (path === '' && parts[i + 2] !== undefined) { path = parts[i + 2] ?? ''; i += 2 }
+    out.push({ path, add: count(part.slice(0, first)), del: count(part.slice(first + 1, second)), ...(part.startsWith('-\t') ? { binary: true as const } : {}) })
+  }
+
+  return out
+}
+
+/**
+ * The change against `base` as hunks: paths, status and counts from the plumbing in `statsOf`, hunk
+ * lines from `git diff` for the renderer, and new files read whole.
+ */
+const filesOf = (worktree: string, base: string, untracked: string[], stats: Stat[], runner: Run): FileDiff[] => {
+  const parsed = parseDiff(git(worktree, ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-renames', '-U3', base, '--'], runner))
+  const byPath = new Map(parsed.map(file => [file.path, file]))
+  const used = new Set<FileDiff>()
+  // One patch block per numstat entry, in the same order; only then is pairing by position meaningful.
+  const aligned = parsed.length === stats.length
+  let cursor = 0
+  const tracked = stats.map(one => {
+    // The patch can name a path differently (quoted or tab-terminated); the plumbing's path is the exact one.
+    const exact = byPath.get(one.path)
+    let source: FileDiff | undefined
+    if (exact !== undefined && !used.has(exact)) source = exact
+    else if (aligned) {
+      while (cursor < parsed.length && used.has(parsed[cursor]!)) cursor += 1
+      source = parsed[cursor]
+      if (source !== undefined) cursor += 1
+    }
+    if (source !== undefined) used.add(source)
+    const binary = one.binary === true || source?.binary === true ? { binary: true as const } : {}
+    if (source === undefined) return { path: one.path, status: 'M' as const, add: one.add, del: one.del, hunks: [], ...binary }
+
+    return { ...source, path: one.path, add: one.add, del: one.del, ...binary }
+  })
   const added = untracked.map(path => {
     try {
       const file = join(worktree, path)
@@ -122,14 +183,13 @@ export const workOf = (worktree: string, base: string, touches: string[], runner
 
       return { sha, subject: subject.join('\t') }
     })
-  const untracked = git(worktree, ['ls-files', '--others', '--exclude-standard'], runner).split('\n').filter(file => file !== '')
-  const changed = [...new Set([...git(worktree, ['diff', '--name-only', base], runner).split('\n'), ...untracked])]
-    .filter(file => file !== '')
-    .sort()
+  const stats = statsOf(worktree, base, runner)
+  const untracked = git(worktree, ['ls-files', '-z', '--others', '--exclude-standard'], runner).split('\0').filter(file => file !== '')
+  const changed = [...new Set([...stats.map(one => one.path), ...untracked])].sort()
   const outside = changed.filter(file => !touches.some(touch => overlaps(touch, file)))
   // The hunks are extra: a diff too large or unreadable leaves the commits and files standing.
   try {
-    const byPath = new Map(filesOf(worktree, base, untracked, runner).map(file => [file.path, file]))
+    const byPath = new Map(filesOf(worktree, base, untracked, stats, runner).map(file => [file.path, file]))
 
     return { commits, changed, outside, files: changed.map(path => byPath.get(path) ?? { path, status: 'M', add: 0, del: 0, hunks: [] }) }
   } catch (error) {

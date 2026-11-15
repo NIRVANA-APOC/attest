@@ -149,7 +149,7 @@ export const panel = async (r: Runtime, options: PanelOptions, terminal: Termina
       if (caseName !== nextCase) {
         if (caseName !== undefined) {
           const typing = ui.input !== undefined
-          ui = { ...ui, selected: '', scroll: 0, input: undefined, help: false, ...(typing ? { message: t('Case changed; input cancelled.') } : {}) }
+          ui = { ...ui, selected: '', scroll: 0, input: undefined, help: false, decision: undefined, auditOpen: undefined, ...(typing ? { message: t('Case changed; input cancelled.') } : {}) }
           if (typing) messageUntil = r.now() + 4000
         }
         caseName = nextCase

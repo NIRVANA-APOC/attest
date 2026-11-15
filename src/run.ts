@@ -1,20 +1,35 @@
-import { spawnSync } from 'node:child_process'
+import { execaSync } from 'execa'
 
 export type Ran = { code: number; out: string; err: string }
 export type RunOptions = { cwd?: string; input?: string; inherit?: boolean; env?: NodeJS.ProcessEnv }
 export type Run = (command: string, args: string[], options?: RunOptions) => Ran
 
+/**
+ * One command, run to completion. execa's sync API, with rejection off so a
+ * failing command is data (`code`), the last newline kept so output is byte for
+ * byte what the command wrote, and a spawn failure reported where spawnSync
+ * reported it: the error text, on `err`, with code 1.
+ */
 export const run: Run = (command, args, options = {}) => {
-  const child = spawnSync(command, args, {
+  const child = execaSync(command, args, {
     cwd: options.cwd,
     env: options.env,
+    // spawnSync's contract: an env runs the child with exactly those variables, none of its own added.
+    extendEnv: false,
     input: options.input,
     encoding: 'utf8',
-    stdio: options.inherit ? 'inherit' : ['pipe', 'pipe', 'pipe'],
+    // `inherit` hands the terminal to the child (a tmux attach); output is then not captured.
+    ...(options.inherit ? { stdio: 'inherit' as const } : { stdio: 'pipe' as const }),
+    stripFinalNewline: false,
     maxBuffer: 16 * 1024 * 1024,
+    reject: false,
   })
 
-  return { code: child.status ?? 1, out: child.stdout ?? '', err: child.error?.message ?? child.stderr ?? '' }
+  return {
+    code: child.exitCode ?? 1,
+    out: child.stdout ?? '',
+    err: child.exitCode === undefined && child.failed ? child.originalMessage ?? child.message ?? '' : child.stderr ?? '',
+  }
 }
 
 /**

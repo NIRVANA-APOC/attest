@@ -126,12 +126,12 @@ const answerSetup = (t, role) => {
 
 test('every wait answered in the role window is told once, oldest first, even after it waits again', t => {
   const { stamp, pending, keys, tell, hooks } = answerSetup(t, 'review')
-  hooks(['UserPromptSubmit', 3], ['PercaseRequest', 4])
+  hooks(['UserPromptSubmit', 3], ['PermissionRequest', 4])
   assert.deepEqual(pending(), [])
   hooks(['PostToolBatch', 5])
   assert.deepEqual(pending(), [{ key: `answer:review:${stamp(5)}`, text: 'Role review was answered in its window and went on working.' }])
   // Not yet told (the orchestrator is busy); it waits again and is answered again: both stay to be told.
-  hooks(['PercaseRequest', 6])
+  hooks(['PermissionRequest', 6])
   assert.deepEqual(keys(), [`answer:review:${stamp(5)}`])
   hooks(['PostToolBatch', 7])
   assert.deepEqual(keys(), [`answer:review:${stamp(5)}`, `answer:review:${stamp(7)}`])
@@ -144,7 +144,7 @@ test('every wait answered in the role window is told once, oldest first, even af
 
 test('a deny or Esc that ends the turn with no result wakes the orchestrator', t => {
   const { write, home, stamp, pending, hooks } = answerSetup(t, 'wake')
-  hooks(['UserPromptSubmit', 3], ['PercaseRequest', 4])
+  hooks(['UserPromptSubmit', 3], ['PermissionRequest', 4])
   const row = (s, content) => `${JSON.stringify({ type: 'user', timestamp: stamp(s), message: { role: 'user', content } })}\n`
   write(join(home, '.claude/projects/-wt/wake-s.jsonl'), row(3, 'go') + row(6, [{ type: 'text', text: '[Request interrupted by user for tool use]' }]))
   assert.deepEqual(pending(), [{ key: `answer:wake:${stamp(6)}`, text: 'Role wake was stopped in its window: its dialog was denied or interrupted, and its turn ended.' }])
@@ -155,7 +155,7 @@ test('a deny or Esc that ends the turn with no result wakes the orchestrator', t
 
 test('an answer a finish has superseded is not replayed when later work is sent', t => {
   const { log, stamp, keys, tell, hooks, result } = answerSetup(t, 'wake')
-  hooks(['UserPromptSubmit', 3], ['PercaseRequest', 4], ['PostToolBatch', 5])
+  hooks(['UserPromptSubmit', 3], ['PermissionRequest', 4], ['PostToolBatch', 5])
   result('---\nstatus: done\nsummary: built it\n---\n', 6)
   hooks(['Stop', 7])
   // The result is newer than the answer: the finish tells it.
@@ -166,7 +166,7 @@ test('an answer a finish has superseded is not replayed when later work is sent'
   hooks(['UserPromptSubmit', 9])
   assert.deepEqual(keys(), [])
   // So is an answer superseded only by work sent since, its finish never told.
-  hooks(['PercaseRequest', 10], ['PostToolBatch', 11])
+  hooks(['PermissionRequest', 10], ['PostToolBatch', 11])
   assert.deepEqual(keys(), [`answer:wake:${stamp(11)}`])
   append(log, 'cli', { ev: 'send', role: 'wake', text: 'more' }, new Date(stamp(12)))
   assert.deepEqual(keys(), [])

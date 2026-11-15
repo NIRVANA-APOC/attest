@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="160" viewBox="0 0 640 160" role="img" aria-labelledby="title">
+  <title id="title">Attest — an attested agent team</title>
+  <defs>
+    <linearGradient id="link" x1="40" y1="26" x2="120" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9ac2ff"/>
+      <stop offset="1" stop-color="#6fa8ff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- the card keeps the lockup legible on light and dark pages alike -->
+  <rect width="640" height="160" rx="20" fill="#151821"/>
+  <rect x="1" y="1" width="638" height="158" rx="19" fill="none" stroke="#2c3446"/>
+
+  <!-- the mark: one chain link, attested -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M80 26 L120 49 L120 95 L80 118 L40 95 L40 49 Z" stroke="url(#link)" stroke-width="7"/>
+    <path d="M58 78 L74 94 L104 58" stroke="#98c379" stroke-width="9"/>
+    <path d="M32 72 L14 72" stroke="#4e6991" stroke-width="6"/>
+    <path d="M128 72 L146 72" stroke="#4e6991" stroke-width="6"/>
+  </g>
+
+  <!-- the wordmark -->
+  <text x="172" y="104" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="84" font-weight="700" letter-spacing="1" fill="#e8eaf0">attest</text>
+  <text x="175" y="136" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" letter-spacing="5.4" fill="#9aa3ad">CASE · ROLES · GATES · JEV AUDIT</text>
+</svg>
