@@ -47,8 +47,9 @@ You need **macOS, Linux or WSL2**, **tmux**, **Node.js 20+**, **git**, and **Cla
 and/or Codex** installed and signed in.
 
 ```sh
-npm install -g attest-cli
-attest setup                 # installs the case workflow for the harnesses it finds
+git clone <repo> && cd Attest
+npm ci && npm run build && npm link   # Attest 0.1.0 is not published to npm; build from source
+attest setup                          # installs the case workflow for the harnesses it finds
 ```
 
 Open Claude Code or Codex **inside tmux, in the repository you want to change**, and ask:
@@ -61,14 +62,13 @@ type, and a dark theme that follows the system setting.
 The agent writes the plan and opens the panel beside it. Read the plan, press **`a`** to
 approve or **`c`** to request changes; roles start only after approval.
 
-Prefer a terminal-first start? Run this in the repository:
+Prefer a terminal-first start? Run this in the repository you want to change:
 
 ```sh
 attest up -m storefront-search --orch claude
 ```
 
-It creates the case worktree, starts the orchestrator in it, and opens the panel. From a
-clone, `npm ci && npm run build && npm link` puts your build of `attest` on the `PATH`.
+It creates the case worktree, starts the orchestrator in it, and opens the panel.
 
 ## From one case to a merged change
 
@@ -210,7 +210,7 @@ repository's wins). Each role's `flags` must pin its agent's permission — Clau
 never inherits a permission mode from your shell. Claude Code roles get lifecycle hooks
 (`UserPromptSubmit`, `PermissionRequest`, `PostToolBatch`, `Stop`, `Notification`) and a
 status line for context use; Codex roles are read from their own session log. The
-[user guide](docs/guide.md#agents) documents the adapter fields and the fallbacks.
+[user guide](docs/guide.md#agent-adapters) documents the adapter fields and the fallbacks.
 
 ## Library choices
 

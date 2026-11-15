@@ -17,15 +17,15 @@ Attest 把"一个人 + 一段需求描述"变成一个经过计划、构建、�
 这些 agent。
 
 ```sh
-npm install -g attest-cli
+git clone <repo> && cd Attest
+npm ci && npm run build && npm link   # 0.1.0 尚未发布到 npm，从源码构建
 attest setup
 ```
 
 `attest setup` 会为检测到的 harness 安装 `attest-case` 工作流技能
 （`~/.claude/skills/attest-case` 和/或 `~/.agents/skills/attest-case`）。它拒绝
 覆盖或删除不是自己安装的目录（安装时会打标记），所以已有的技能目录不会被碰。
-`attest setup --remove` 只移除带标记的安装。从源码使用时，用
-`npm ci && npm run build && npm link` 代替全局安装。
+`attest setup --remove` 只移除带标记的安装。
 
 在**要修改的仓库里、tmux 中**打开 Claude Code 或 Codex，以"案件"的方式提出工作。
 技能描述会匹配"attest case""把这件事作为 attest 案件来做""拆成几个角色并行"
@@ -213,14 +213,15 @@ audit:
 | `close <role>` | `--all`、`-m` | 关闭 attest 打开的 pane；worktree 与分支保留 |
 | `teardown` | `--force`、`-m` | 工作流的关卡都批准后：关闭角色 pane 与案件面板，移除角色 worktree、角色分支、案件 worktree 与临时 brief/结果；保留案件分支与日志。有脏/未跟踪改动、未合并进 `base` 的提交、未推送的案件分支时拒绝（除非 `--force`）；带其他 owner 标记的 pane 会被跳过；已完成的案件必须显式 `-m`，重复清理会报告没有剩余内容 |
 | `panel` | `--once`、`--plain`、`--no-anim`、`--width N`、`--height N`、`-m` | 实时面板；`--once` 打印一帧后退出（适合脚本）；`--plain` 去掉颜色；`--no-anim` 关闭动效；面板至少需要 40x10 |
-| `audit verify` | `--json`、`-m` | 校验哈希链：`OK <n> records`（成功的非空校验会追加一条 `audit-verify`），或 `BROKEN at record <n>: <原因>` 并退出 1 |
-| `audit report` | `--json`、`--write`、`-m` | 案件审计摘要：链、模式/提供方、计数、风险、一句话结论、决策表、结果、校准。`--write` 把 `docs/cases/<case>/audit.md` 写进案件 worktree；链断时退出 1 |
+| `audit verify` | `--json`、`-m` | 校验哈希链：`OK <n> records`（成功的非空校验会追加一条 `audit-verify`）、空账本 `OK 0 records`、尾部撕裂时 `OK <n> records (incomplete final line ignored)`（后两者不追加），或 `BROKEN at record <n>: <原因>` 并退出 1 |
+| `audit report` | `--json`、`--write`、`-m` | 案件审计摘要：链、模式/提供方、计数、风险、一句话结论、决策表、结果、校准。模式、提供方与结论来自已记录的动作（计划/环境配置只在账本为空时用于标注）。`--write` 写出 `docs/cases/<case>/audit.md` 并打印 `Wrote <path>`；此时 `--json` 给出 `written`（绝对路径）；断链时给出 `writeRefused`——断链退出 1，且绝不会发布为报告 |
 | `audit show <n>` | `--json`、`-m` | 按账本序号或决策 id（最近一条）查看单条决策：原因、状态摘要、答案与耗时 |
 | `audit outcome <id\|seq>` | `<allow\|ask\|block\|defect\|pass>`、`--note`、`--json`、`-m` | 追加人的判定供校准；`expected` 是记录的动作，`observed` 是你的判定 |
-| `audit calibrate` | `--json`、`-m` | Brier 分数、可靠性分箱与建议性阈值；可用结果少于 5 条时报告 `insufficient outcomes` 并退出 0 |
+| `audit calibrate` | `--json`、`-m` | Brier 分数、可靠性分箱与建议性阈值；可用结果少于 5 条时报告 `insufficient outcomes` 并退出 0。重校准映射至少需要 12 条结果，且留出集上的 Brier 分数确实改善 |
 
-`attest stage audit` 是工作流里的审计阶段：校验链、记录结果相关决策、刷新报告，
-然后把案件交给 MR OK 关卡。面板的 AUDIT 页读取同一份账本（见[面板](#面板)）。
+`attest stage audit` 是工作流里的审计阶段：校验链、为每个已派发且写了结果的
+角色记录一条 `result.fidelity` 决策、写出报告，然后移动阶段。断链或 enforce
+模式下的 block 会让阶段停在原地。面板的 AUDIT 页读取同一份账本（见[面板](#面板)）。
 
 Attest 还会为它给 Claude Code 角色安装的生命周期钩子与状态栏安装两个内部辅助入口。
 它们不属于受支持的 CLI 表面，也不会出现在 `attest --help` 里。
@@ -387,7 +388,7 @@ macOS 上用 Node 20 与 22 跑，并额外在空 locale 下跑一次，以捕�
 - **身份扫描。** `scripts/check-names.mjs` 拒绝仓库里出现旧项目身份；
   `npm run check` 会运行它。
 - **截图。** `docs/media/*.png` 是 tmux 里真实 `attest panel` 帧，用 Pillow 渲染。
-  流程与依赖见 [tools/screenshot](tools/screenshot/README.md)。
+  流程与依赖见 [tools/screenshot](../tools/screenshot/README.md)。
 - **文档契约。** `tests/docs-contract.node.mjs` 检查文档里出现的命令确实存在于
   `attest --help`、每个本地图片引用都存在，以及两个 README 引用同一组截图。
 

@@ -19,7 +19,8 @@ Requirements: **macOS, Linux or WSL2**, **tmux**, **Node.js 20+**, **git**, and
 terminals; Attest does not wrap or replace the agents.
 
 ```sh
-npm install -g attest-cli
+git clone <repo> && cd Attest
+npm ci && npm run build && npm link   # 0.1.0 is not published to npm; build from source
 attest setup
 ```
 
@@ -27,8 +28,7 @@ attest setup
 finds (`~/.claude/skills/attest-case` and/or `~/.agents/skills/attest-case`).
 It refuses to overwrite or remove a directory it did not install (it marks its
 own installs), so an existing skill tree is left alone. `attest setup --remove`
-removes only marked installs. From a clone use `npm ci && npm run build &&
-npm link` instead of the global install.
+removes only marked installs.
 
 Open Claude Code or Codex **inside tmux, in the repository you want to change**,
 and ask for the work as a case. The skill's description matches phrases such as
@@ -227,16 +227,17 @@ are printed), **2** usage error (the message and usage are printed to stderr).
 | `close <role>` | `--all`, `-m` | close attest's panes; worktrees and branches stay |
 | `teardown` | `--force`, `-m` | after the workflow's gates are approved: close role panes and the case panel, remove role worktrees and branches, the case worktree and temporary briefs/results; preserve the case branch and log. Refuses dirty/untracked work, commits not merged into `base`, or an unpushed case branch unless `--force`; panes with another owner marker are skipped; a finished case requires `-m` and repeated teardown reports nothing left |
 | `panel` | `--once`, `--plain`, `--no-anim`, `--width N`, `--height N`, `-m` | the live panel; `--once` prints one frame and exits (useful in scripts); `--plain` drops colour; `--no-anim` stops motion; the panel needs at least 40x10 |
-| `audit verify` | `--json`, `-m` | verify the hash chain: `OK <n> records` (a successful non-empty verify appends an `audit-verify` record) or `BROKEN at record <n>: <reason>`, exit 1 |
-| `audit report` | `--json`, `--write`, `-m` | the case's audit summary: chain, mode/provider, counts, risk, one-sentence verdict, decision table, outcomes, calibration. `--write` writes `docs/cases/<case>/audit.md` in the case worktree; exit 1 iff the chain is broken |
+| `audit verify` | `--json`, `-m` | verify the hash chain: `OK <n> records` (a successful non-empty verify appends an `audit-verify` record), `OK 0 records` on an empty ledger, `OK <n> records (incomplete final line ignored)` on a torn tail (neither appends), or `BROKEN at record <n>: <reason>` with exit 1 |
+| `audit report` | `--json`, `--write`, `-m` | the case's audit summary: chain, mode/provider, counts, risk, one-sentence verdict, decision table, outcomes, calibration. Mode, provider and verdict come from the recorded actions (the plan/env config only labels an empty ledger). `--write` writes `docs/cases/<case>/audit.md` and prints `Wrote <path>`; `--json` then includes `written` (absolute path) or, on a broken chain, `writeRefused` — a broken ledger exits 1 and is never published as a report |
 | `audit show <n>` | `--json`, `-m` | one decision by ledger sequence or by decision id (latest match): reason, state digest, answers, timing |
 | `audit outcome <id\|seq>` | `<allow\|ask\|block\|defect\|pass>`, `--note`, `--json`, `-m` | append a human verdict for calibration; `expected` is the decision's recorded action, `observed` your verdict |
-| `audit calibrate` | `--json`, `-m` | Brier score, reliability bins and advisory threshold suggestions; with fewer than five usable outcomes it reports `insufficient outcomes` and exits 0 |
+| `audit calibrate` | `--json`, `-m` | Brier score, reliability bins and advisory threshold suggestions; with fewer than five usable outcomes it reports `insufficient outcomes` and exits 0. A recalibration map needs at least 12 outcomes and a holdout split that improves the Brier score |
 
 `attest stage audit` is the workflow's audit stage: it verifies the chain,
-records the result decisions, refreshes the report and hands the case to the
-MR OK gate. The panel's AUDIT page reads the same ledger (see
-[the panel](#the-panel)).
+records a `result.fidelity` decision for every dispatched role that wrote a
+result, writes the report, then moves the stage. A broken chain, or an
+enforce-mode block, leaves the stage where it was. The panel's AUDIT page reads
+the same ledger (see [the panel](#the-panel)).
 
 Attest also installs two internal helper entry points for the lifecycle hooks
 and status line it gives Claude Code roles. They are not part of the supported
@@ -426,7 +427,7 @@ and 22, and once with an empty locale to catch locale-dependent output.
   identity anywhere in the repository; `npm run check` runs it.
 - **Screenshots.** `docs/media/*.png` are real `attest panel` frames captured
   from tmux and rendered with Pillow. See
-  [tools/screenshot](tools/screenshot/README.md) for the pipeline and its
+  [tools/screenshot](../tools/screenshot/README.md) for the pipeline and its
   requirements.
 - **Docs contract.** `tests/docs-contract.node.mjs` checks that commands shown
   in the docs exist in `attest --help`, that every local image reference

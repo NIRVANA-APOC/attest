@@ -16,7 +16,7 @@ labels: bug
 
 **Versions**
 
-- attest: <!-- npm ls -g attest-cli -->
+- attest: <!-- attest --version, and the commit you built from -->
 - tmux: <!-- tmux -V -->
 - Claude Code / Codex: <!-- claude --version, codex --version -->
 - OS:

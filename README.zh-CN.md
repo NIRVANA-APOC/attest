@@ -45,8 +45,9 @@ Attest 0.1.0 · MIT · 运行在 tmux 里 · 支持 Claude Code 与 Codex · 不
 **Claude Code 和/或 Codex**。
 
 ```sh
-npm install -g attest-cli
-attest setup                 # 为检测到的 harness 安装案件工作流
+git clone <repo> && cd Attest
+npm ci && npm run build && npm link   # Attest 0.1.0 尚未发布到 npm，从源码构建
+attest setup                          # 为检测到的 harness 安装案件工作流
 ```
 
 在**要修改的仓库里、tmux 中**打开 Claude Code 或 Codex，然后说：
@@ -59,14 +60,13 @@ attest setup                 # 为检测到的 harness 安装案件工作流
 agent 会写好计划，并在旁边打开面板。看计划，按 **`a`** 批准或按 **`c`** 提出修改；
 批准之后角色才会启动。
 
-更偏终端的方式，也可以直接在仓库里跑：
+更偏终端的方式，也可以直接在要修改的仓库里跑：
 
 ```sh
 attest up -m storefront-search --orch claude
 ```
 
-它会创建案件 worktree、在其中启动编排者并打开面板。从源码使用时，
-`npm ci && npm run build && npm link` 会把你构建的 `attest` 放到 `PATH` 上。
+它会创建案件 worktree、在其中启动编排者并打开面板。
 
 ## 从一个案件到一次合并
 

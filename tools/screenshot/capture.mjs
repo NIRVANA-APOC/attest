@@ -118,11 +118,27 @@ const waitFor = async (pane, pattern, what, timeout = 20000) => {
 const sendText = (pane, text) => tmux(['send-keys', '-l', '-t', pane, text])
 const sendKey = (pane, key) => tmux(['send-keys', '-t', pane, key])
 
-/** Run one CLI command in the pane's shell and wait until its success line shows. */
+/**
+ * Run one CLI command in the pane's shell and wait until *its own* output shows.
+ * A unique echo marker after the command keeps an earlier command's matching
+ * line from satisfying the wait, so a failed command cannot be mistaken for a
+ * successful one.
+ */
+let commandSeq = 0
+let previousMark = ''
 const cli = async (pane, command, expect, what) => {
-  sendText(pane, command)
+  const seq = ++commandSeq
+  // The marker is assembled by printf so the echoed command line never contains
+  // the finished marker; only the command's own output can satisfy the wait.
+  const mark = `__attest_shot_${seq}done__`
+  sendText(pane, `${command}; printf '__attest_shot_%s__' ${seq}done`)
   sendKey(pane, 'Enter')
-  return waitFor(pane, expect, what ?? command)
+  const text = await waitFor(pane, new RegExp(mark), what ?? command)
+  const start = previousMark === '' ? 0 : text.lastIndexOf(previousMark) + previousMark.length
+  const fresh = start > 0 ? text.slice(start) : text
+  previousMark = mark
+  if (expect !== undefined && !expect.test(fresh)) die(`${what ?? command}: expected ${String(expect)} in the command's output\n--- fresh output ---\n${fresh.slice(-2000)}`)
+  return fresh
 }
 
 const paneOf = session => listPanes().find(one => one.session === session)?.pane ?? die(`no pane in session ${session}`)
@@ -336,15 +352,16 @@ suggestions through the tokens.`)
     roleDid('review', 'review: both branches pass')
     await cli(shell, `node ${shellQuote(CLI)} stage audit`, /Stage: audit/, 'stage audit')
     // Record a few human verdicts so the page shows calibration rather than the empty state.
+    // Only decisions this case actually records: its audit.questions list omits role.boundary.
     for (const [decision, verdict, note] of [
       ['plan.risk', 'pass', 'the split held; no work outside the touches'],
-      ['role.boundary', 'pass', 'both builders stayed inside their trees'],
+      ['plan.clarity', 'pass', 'every role had a one-line check it could run'],
       ['result.fidelity', 'pass', 'every result named a command or path'],
-      ['merge.risk', 'pass', 'reviewed branch by branch, one fix round'],
     ]) {
       await cli(shell, `node ${shellQuote(CLI)} audit outcome ${decision} ${verdict} --note ${shellQuote(note)}`, /Recorded outcome/, `audit outcome ${decision}`)
     }
     await cli(shell, `node ${shellQuote(CLI)} gate mr-ok "Merge the two reviewed branches and open the MR?" --no-wait`, /Opened gate mr-ok/, 'gate mr-ok')
+    await cli(shell, `node ${shellQuote(CLI)} audit outcome merge.risk pass --note ${shellQuote('reviewed branch by branch, one fix round')}`, /Recorded outcome/, 'audit outcome merge.risk')
     const auditPanel = await panelSession('panel-audit', HOME_EN)
     sendKey(auditPanel, '6')
     await sleep(900)
